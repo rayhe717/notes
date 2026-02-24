@@ -4,3 +4,7 @@ dist
 .env
 .env.*
 *.log
+
+# Avoid committing accidental API key filenames (e.g. pasted "VAR=sk-...")
+*=sk-*
+*API*KEY*

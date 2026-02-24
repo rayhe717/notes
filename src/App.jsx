@@ -6,6 +6,7 @@ import {
   STUDY_SHEET_PROMPT,
   CONCEPT_MAP_PROMPT,
   MULTI_NOTE_OUTLINE_PROMPT,
+  REVIEW_QUESTIONS_PROMPT,
   buildUserMessageWithNotes,
   buildUserMessageWithMultipleNotes
 } from "./prompts.js";
@@ -35,7 +36,8 @@ function getApiStatus(apiError, isOnline) {
 const initialOutputs = {
   reviewSheet: "",
   studySheet: "",
-  conceptMap: ""
+  conceptMap: "",
+  reviewQuestions: ""
 };
 
 export default function App() {
@@ -46,6 +48,7 @@ export default function App() {
     reviewSheet: false,
     studySheet: false,
     conceptMap: false,
+    reviewQuestions: false,
     multiNoteOutline: false
   });
   const [multiNoteOutlineContent, setMultiNoteOutlineContent] = useState("");
@@ -170,7 +173,10 @@ export default function App() {
   const processOutputsForFile = useCallback(
     async (fileItem, selection) => {
       const selectedAny =
-        selection.reviewSheet || selection.studySheet || selection.conceptMap;
+        selection.reviewSheet ||
+        selection.studySheet ||
+        selection.conceptMap ||
+        selection.reviewQuestions;
       if (!selectedAny) {
         throw new Error("Please select at least one output type.");
       }
@@ -203,6 +209,14 @@ export default function App() {
           userMessage
         );
         newOutputs.conceptMap = content;
+      }
+
+      if (selection.reviewQuestions) {
+        const content = await generateWithDeepSeek(
+          REVIEW_QUESTIONS_PROMPT,
+          userMessage
+        );
+        newOutputs.reviewQuestions = content;
       }
 
       updateFileStatus(fileItem.id, {
@@ -243,6 +257,7 @@ export default function App() {
       outputSelection.reviewSheet ||
       outputSelection.studySheet ||
       outputSelection.conceptMap ||
+      outputSelection.reviewQuestions ||
       outputSelection.multiNoteOutline;
     if (!selectedAny) {
       setGlobalError("Please select at least one output type.");
@@ -263,7 +278,12 @@ export default function App() {
     setMultiNoteOutlineContent((prev) => (outputSelection.multiNoteOutline && targetIds.length >= 2 ? "" : prev));
 
     try {
-      if (outputSelection.reviewSheet || outputSelection.studySheet || outputSelection.conceptMap) {
+      if (
+        outputSelection.reviewSheet ||
+        outputSelection.studySheet ||
+        outputSelection.conceptMap ||
+        outputSelection.reviewQuestions
+      ) {
         for (const id of targetIds) {
           const file = files.find((f) => f.id === id);
           if (!file) continue;
@@ -340,7 +360,9 @@ export default function App() {
             ? "review"
             : typeKey === "studySheet"
             ? "study"
-            : "concept-map";
+            : typeKey === "conceptMap"
+            ? "concept-map"
+            : "review-questions";
         baseName = selectedFile.name.replace(/\.[^.]+$/, "");
         title = `${baseName} – ${suffix.replace("-", " ")}`;
       }
@@ -772,6 +794,19 @@ export default function App() {
             <label className="checkbox-label">
               <input
                 type="checkbox"
+                checked={outputSelection.reviewQuestions}
+                onChange={(e) =>
+                  setOutputSelection((prev) => ({
+                    ...prev,
+                    reviewQuestions: e.target.checked
+                  }))
+                }
+              />
+              Review Questions
+            </label>
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
                 checked={outputSelection.multiNoteOutline}
                 onChange={(e) =>
                   setOutputSelection((prev) => ({
@@ -869,6 +904,14 @@ export default function App() {
                 <button
                   type="button"
                   className="btn tiny"
+                  onClick={() => handleDownloadHtml("reviewQuestions")}
+                  disabled={!selectedFile || !selectedFile.outputs.reviewQuestions}
+                >
+                  Review Questions (web page)
+                </button>
+                <button
+                  type="button"
+                  className="btn tiny"
                   onClick={() => handleDownloadHtml("multiNoteOutline")}
                   disabled={!multiNoteOutlineContent}
                 >
@@ -882,7 +925,10 @@ export default function App() {
                 Select a file to view generated study materials.
               </div>
             ) : (
-              <PreviewTabs file={selectedFile} multiNoteOutlineContent={multiNoteOutlineContent} />
+              <PreviewTabs
+                file={selectedFile}
+                multiNoteOutlineContent={multiNoteOutlineContent}
+              />
             )}
           </section>
         </section>
@@ -904,7 +950,9 @@ function PreviewTabs({ file, multiNoteOutlineContent }) {
     if (!file) return "";
     if (activeTab === "review") return file.outputs?.reviewSheet ?? "";
     if (activeTab === "study") return file.outputs?.studySheet ?? "";
-    return file.outputs?.conceptMap ?? "";
+    if (activeTab === "concept") return file.outputs?.conceptMap ?? "";
+    if (activeTab === "questions") return file.outputs?.reviewQuestions ?? "";
+    return "";
   }, [activeTab, file, multiNoteOutlineContent]);
 
   const tabIsEmpty = !tabContent;
@@ -932,6 +980,13 @@ function PreviewTabs({ file, multiNoteOutlineContent }) {
           onClick={() => setActiveTab("concept")}
         >
           Concept Map
+        </button>
+        <button
+          type="button"
+          className={"tab" + (activeTab === "questions" ? " tab-active" : "")}
+          onClick={() => setActiveTab("questions")}
+        >
+          Review Questions
         </button>
         {hasMultiNote && (
           <button

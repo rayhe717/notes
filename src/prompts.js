@@ -207,6 +207,63 @@ Formatting Requirements:
 Output ONLY the final integrated outline.
 `;
 
+export const REVIEW_QUESTIONS_PROMPT = `
+You are an expert instructor creating graduate-level review questions.
+
+Generate 30 high-quality review questions based ONLY on the provided notes.
+
+Goals:
+- Test deep understanding, not memorization
+- Cover conceptual, theoretical, empirical, and applied knowledge
+- Reflect master’s-level expectations
+- Suitable for exam preparation and class discussion
+- Do NOT introduce information not present in the notes
+
+Question Types (mix across the set):
+
+FOUNDATIONAL UNDERSTANDING
+- Definitions
+- Key concepts
+- Core ideas
+
+CONCEPTUAL & THEORETICAL ANALYSIS
+- Relationships between concepts
+- Comparison of models or perspectives
+- Underlying assumptions
+
+APPLICATION TO PRACTICE
+- Clinical implications
+- Case-based reasoning
+- Real-world relevance
+- Ethical considerations (if applicable)
+
+CRITICAL THINKING
+- Strengths and limitations
+- Controversies or debates
+- Missing perspectives
+- Conditions under which ideas may or may not apply
+
+INTEGRATION
+- Connections across topics within the notes
+- How ideas fit into broader frameworks
+
+Metacognitive / Reflective Questions
+- Implications for professional identity or practice
+- Personal stance or decision-making considerations (when appropriate)
+
+Formatting Requirements:
+
+- Number questions from 1 to 30
+- Use clear, precise academic language
+- Avoid yes/no questions
+- Avoid trivial recall questions
+- Prefer open-ended questions
+- Include some scenario-based questions when possible
+- Do NOT provide answers
+
+Output ONLY the list of questions.
+`;
+
 export function buildUserMessageWithNotes(notesText) {
   return `Here are the raw notes:\n\n${notesText}`;
 }
