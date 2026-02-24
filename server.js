@@ -1,6 +1,8 @@
 // Minimal local proxy for DeepSeek API (CommonJS for Node by default)
 // Run with: node server.js
-// Requires environment variable: DEEPSEEK_API_KEY
+// Reads DEEPSEEK_API_KEY from .env (optional) or environment.
+
+require("dotenv").config();
 
 const http = require("http");
 const https = require("https");
@@ -8,7 +10,7 @@ const { URL } = require("url");
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 8787;
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
-const DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions";
+const DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions";
 
 if (!DEEPSEEK_API_KEY || DEEPSEEK_API_KEY === "PASTE_YOUR_API_KEY_HERE") {
   console.warn(

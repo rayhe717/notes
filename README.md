@@ -7,7 +7,6 @@ Local‑first web app that turns your rough psychology notes into structured aca
 - **Local file handling**: Notes stay on your device (supports `.txt` and `.md`).
 - **Folder selection**: Use the File System Access API to select an entire folder of notes.
 - **Manual uploads**: Upload individual files via a standard file picker.
-- **Rescan**: Refreshes the current folder to pick up new or changed files.
 - **DeepSeek integration**: Generates:
   - Review Sheet (master’s‑level notes)
   - One‑Page Study Sheet
@@ -28,26 +27,30 @@ cd /Users/asteray/Downloads/cursor-notes
 npm install
 ```
 
-### 2. Configure the DeepSeek API key (direct from browser)
+### 2. Configure the DeepSeek API key (recommended: local proxy)
 
-For simplicity, the default setup calls DeepSeek **directly from the browser**.
-This is fine for **personal, local use**, but it means your key is bundled in the frontend.
+Direct browser calls to DeepSeek often fail due to **CORS/network policy**.  
+This project uses a tiny **local proxy** (`server.js`) so the browser calls `localhost`, and the proxy forwards to DeepSeek.
 
-Open `src/deepseekClient.js` and set:
-
-```js
-export const DEEPSEEK_API_KEY = "sk-your-key-here";
-```
-
-> If your browser or network blocks direct calls (CORS/network policy), you can
-> instead run `server.js` as a tiny local proxy and point the frontend at it,
-> but that’s optional and not required for basic local testing.
-
-### 3. Run the app locally
+Create a `.env` file (not committed) in the project root:
 
 ```bash
 cd /Users/asteray/Downloads/cursor-notes
-npm run dev
+cp .env.example .env
+```
+
+Then edit `.env` and set:
+
+```bash
+DEEPSEEK_API_KEY=sk-your-key-here
+```
+
+### 3. Run the app locally (proxy + Vite together)
+
+```bash
+cd /Users/asteray/Downloads/cursor-notes
+npm install
+npm run dev:all
 ```
 
 Then open the printed local URL in your browser (typically `http://localhost:5173`).
@@ -63,7 +66,7 @@ Then open the printed local URL in your browser (typically `http://localhost:517
      - One‑Page Study Sheet
      - Text‑Based Concept Map
 3. **Process**
-   - Click **Process All** to send extracted text to DeepSeek and generate the selected outputs for each file.
+   - Click **Process** to generate outputs for the selected file (or checked files).
    - Progress and per‑file errors are displayed in the file list.
 4. **Inspect results**
    - Click any file in the list.

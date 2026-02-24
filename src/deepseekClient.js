@@ -1,18 +1,9 @@
-// DeepSeek direct API configuration (browser -> DeepSeek)
-// NOTE: For personal/local use only. This keeps your key in the frontend bundle.
-// Some environments may still block this with CORS; if that happens,
-// you'll need a small proxy (server.js) or to host one elsewhere.
-
-export const DEEPSEEK_API_KEY = "sk-0a383d9dc86d490ea0a38c0409a0057e";
-
-const DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions";
+// DeepSeek local-proxy configuration (browser -> local proxy -> DeepSeek).
+// This avoids CORS issues and keeps the API key out of the frontend bundle.
+const PROXY_URL = "http://127.0.0.1:8787/chat";
 const DEEPSEEK_MODEL = "deepseek-chat";
 
 export async function generateWithDeepSeek(systemPrompt, userContent) {
-  if (!DEEPSEEK_API_KEY || DEEPSEEK_API_KEY === "PASTE_YOUR_API_KEY_HERE") {
-    throw new Error("Missing DeepSeek API key. Please set DEEPSEEK_API_KEY in src/deepseekClient.js.");
-  }
-
   const body = {
     model: DEEPSEEK_MODEL,
     messages: [
@@ -22,18 +13,26 @@ export async function generateWithDeepSeek(systemPrompt, userContent) {
     stream: false
   };
 
-  const response = await fetch(DEEPSEEK_API_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${DEEPSEEK_API_KEY}`
-    },
-    body: JSON.stringify(body)
-  });
+  let response;
+  try {
+    response = await fetch(PROXY_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(body)
+    });
+  } catch (err) {
+    throw new Error(
+      "Failed to reach the local DeepSeek proxy. Start it with `npm run dev:all` (or `npm run proxy`) and ensure it is listening on 127.0.0.1:8787."
+    );
+  }
 
   if (!response.ok) {
     const text = await response.text().catch(() => "");
-    throw new Error(`DeepSeek API error (${response.status}): ${text || response.statusText}`);
+    throw new Error(
+      `DeepSeek proxy/API error (${response.status}): ${text || response.statusText}`
+    );
   }
 
   const json = await response.json();

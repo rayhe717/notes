@@ -1,12 +1,13 @@
 import React, { useCallback, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { jsPDF } from "jspdf";
 import { generateWithDeepSeek } from "./deepseekClient.js";
 import {
   REVIEW_SHEET_PROMPT,
   STUDY_SHEET_PROMPT,
   CONCEPT_MAP_PROMPT,
-  buildUserMessageWithNotes
+  MULTI_NOTE_OUTLINE_PROMPT,
+  buildUserMessageWithNotes,
+  buildUserMessageWithMultipleNotes
 } from "./prompts.js";
 
 const SUPPORT_EXTENSIONS = [".txt", ".md"];
@@ -39,14 +40,15 @@ const initialOutputs = {
 
 export default function App() {
   const [files, setFiles] = useState([]);
-  const [directoryHandle, setDirectoryHandle] = useState(null);
   const [selectedFileId, setSelectedFileId] = useState(null);
   const [selectedFileIds, setSelectedFileIds] = useState([]);
   const [outputSelection, setOutputSelection] = useState({
     reviewSheet: false,
     studySheet: false,
-    conceptMap: false
+    conceptMap: false,
+    multiNoteOutline: false
   });
+  const [multiNoteOutlineContent, setMultiNoteOutlineContent] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
   const [globalError, setGlobalError] = useState("");
   const [apiError, setApiError] = useState("");
@@ -65,10 +67,8 @@ export default function App() {
         return;
       }
 
-      const handle = await window.showDirectoryPicker();
-      setDirectoryHandle(handle);
-
       const newFiles = [];
+      const handle = await window.showDirectoryPicker();
       for await (const [name, entry] of handle.entries()) {
         if (entry.kind === "file" && isSupportedFile(name)) {
           const file = await entry.getFile();
@@ -140,63 +140,6 @@ export default function App() {
     });
     event.target.value = "";
   }, [selectedFileId]);
-
-  const rescanFiles = useCallback(async () => {
-    setGlobalError("");
-
-    if (!directoryHandle && files.length === 0) {
-      setGlobalError("Nothing to rescan yet. Load files first.");
-      return;
-    }
-
-    try {
-      const updated = [];
-
-      if (directoryHandle) {
-        for await (const [name, entry] of directoryHandle.entries()) {
-          if (entry.kind === "file" && isSupportedFile(name)) {
-            const file = await entry.getFile();
-            const existing = files.find(
-              (f) => f.source === "folder" && f.name === name
-            );
-
-            updated.push(
-              existing
-                ? {
-                    ...existing,
-                    fileObject: file,
-                    status: "idle",
-                    error: ""
-                  }
-                : {
-                    id: `${entry.name}-${file.lastModified}-${file.size}-${Math.random().toString(36).slice(2)}`,
-                    name,
-                    source: "folder",
-                    handle: entry,
-                    fileObject: file,
-                    status: "idle",
-                    error: "",
-                    text: "",
-                    outputs: { ...initialOutputs }
-                  }
-            );
-          }
-        }
-      }
-
-      const uploaded = files.filter((f) => f.source === "upload");
-      const combined = [...uploaded, ...updated];
-      setFiles(combined);
-      const stillSelected = combined.find((f) => f.id === selectedFileId);
-      if (!stillSelected) {
-        const first = combined[0]?.id || null;
-        setSelectedFileId(first);
-        setSelectedFileIds(first ? [first] : []);
-      }
-    } catch (err) {
-      setGlobalError(err?.message || "Failed to rescan files.");
-    }
-  }, [directoryHandle, files, selectedFileId]);
 
   const ensureFileTextLoaded = useCallback(
     async (fileItem) => {
@@ -299,7 +242,8 @@ export default function App() {
     const selectedAny =
       outputSelection.reviewSheet ||
       outputSelection.studySheet ||
-      outputSelection.conceptMap;
+      outputSelection.conceptMap ||
+      outputSelection.multiNoteOutline;
     if (!selectedAny) {
       setGlobalError("Please select at least one output type.");
       return;
@@ -310,20 +254,54 @@ export default function App() {
         ? selectedFileIds
         : [selectedFile.id];
 
+    if (outputSelection.multiNoteOutline && targetIds.length < 2) {
+      setGlobalError("Multi-note outline requires at least 2 files. Check two or more files in the list.");
+      return;
+    }
+
     setIsProcessing(true);
+    setMultiNoteOutlineContent((prev) => (outputSelection.multiNoteOutline && targetIds.length >= 2 ? "" : prev));
 
     try {
-      for (const id of targetIds) {
-        const file = files.find((f) => f.id === id);
-        if (!file) continue;
+      if (outputSelection.reviewSheet || outputSelection.studySheet || outputSelection.conceptMap) {
+        for (const id of targetIds) {
+          const file = files.find((f) => f.id === id);
+          if (!file) continue;
 
-        updateFileStatus(id, { status: "processing", error: "" });
+          updateFileStatus(id, { status: "processing", error: "" });
+          try {
+            await processOutputsForFile(file, outputSelection);
+            updateFileStatus(id, { status: "done" });
+          } catch (err) {
+            const message = err?.message || "Failed to process file.";
+            updateFileStatus(id, { status: "error", error: message });
+            if (message.toLowerCase().includes("deepseek")) {
+              setApiError(message);
+            }
+          }
+        }
+      }
+
+      if (outputSelection.multiNoteOutline && targetIds.length >= 2) {
         try {
-          await processOutputsForFile(file, outputSelection);
-          updateFileStatus(id, { status: "done" });
+          const entries = [];
+          for (const id of targetIds) {
+            const file = files.find((f) => f.id === id);
+            if (!file) continue;
+            const text = await ensureFileTextLoaded(file);
+            entries.push({ name: file.name, text });
+          }
+          if (entries.length >= 2) {
+            const userMessage = buildUserMessageWithMultipleNotes(entries);
+            const content = await generateWithDeepSeek(
+              MULTI_NOTE_OUTLINE_PROMPT,
+              userMessage
+            );
+            setMultiNoteOutlineContent(content);
+          }
         } catch (err) {
-          const message = err?.message || "Failed to process file.";
-          updateFileStatus(id, { status: "error", error: message });
+          const message = err?.message || "Failed to generate multi-note outline.";
+          setGlobalError(message);
           if (message.toLowerCase().includes("deepseek")) {
             setApiError(message);
           }
@@ -332,89 +310,340 @@ export default function App() {
     } finally {
       setIsProcessing(false);
     }
-  }, [files, outputSelection, processOutputsForFile, selectedFile, selectedFileIds, updateFileStatus]);
+  }, [files, outputSelection, processOutputsForFile, selectedFile, selectedFileIds, updateFileStatus, ensureFileTextLoaded]);
 
-  const handleDownload = useCallback(
+  const handleDownloadHtml = useCallback(
     (typeKey) => {
-      if (!selectedFile) return;
-      const content = selectedFile.outputs[typeKey];
-      if (!content) {
-        setGlobalError("Nothing to download for this output type yet.");
-        return;
+      let content;
+      let suffix;
+      let baseName;
+      let title;
+
+      if (typeKey === "multiNoteOutline") {
+        content = multiNoteOutlineContent;
+        if (!content) {
+          setGlobalError("Generate a multi-note outline first (select 2+ files and Multi-note outline).");
+          return;
+        }
+        suffix = "multi-note-outline";
+        baseName = "multi-note-outline";
+        title = "Multi-note outline";
+      } else {
+        if (!selectedFile) return;
+        content = selectedFile.outputs[typeKey];
+        if (!content) {
+          setGlobalError("Nothing to download for this output type yet.");
+          return;
+        }
+        suffix =
+          typeKey === "reviewSheet"
+            ? "review"
+            : typeKey === "studySheet"
+            ? "study"
+            : "concept-map";
+        baseName = selectedFile.name.replace(/\.[^.]+$/, "");
+        title = `${baseName} – ${suffix.replace("-", " ")}`;
       }
-      const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
+
+      const html = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>${title.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root {
+        color-scheme: light dark;
+      }
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0;
+        padding: 0;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #f5f5f5;
+        color: #111827;
+      }
+      body.dark {
+        background: #020617;
+        color: #e5e7eb;
+      }
+      .page {
+        max-width: 900px;
+        margin: 2rem auto 3rem;
+        padding: 1.5rem 1.75rem 1.75rem;
+        border-radius: 1rem;
+        background: white;
+        color: #111827;
+        box-shadow: 0 22px 50px rgba(15, 23, 42, 0.2);
+      }
+      body.dark .page {
+        background: #020617;
+        color: #e5e7eb;
+        box-shadow: 0 22px 50px rgba(15, 23, 42, 0.8);
+      }
+      .page-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 0.75rem;
+        margin-bottom: 0.75rem;
+      }
+      .page-title {
+        font-size: 1.4rem;
+        font-weight: 600;
+      }
+      .page-meta {
+        font-size: 0.85rem;
+        opacity: 0.8;
+      }
+      .markdown-body {
+        font-size: 0.95rem;
+        line-height: 1.6;
+      }
+      .markdown-body h1,
+      .markdown-body h2,
+      .markdown-body h3,
+      .markdown-body h4 {
+        margin-top: 1.1rem;
+        margin-bottom: 0.45rem;
+        font-weight: 600;
+      }
+      .markdown-body h1 { font-size: 1.4rem; }
+      .markdown-body h2 { font-size: 1.2rem; border-bottom: 1px solid rgba(148, 163, 184, 0.5); padding-bottom: 0.15rem; }
+      .markdown-body h3 { font-size: 1.05rem; }
+      .markdown-body h4 { font-size: 0.98rem; font-style: italic; }
+      .markdown-body p {
+        margin: 0.5rem 0;
+        line-height: 1.55;
+      }
+      .markdown-body ul,
+      .markdown-body ol {
+        margin: 0.6rem 0 0.6rem 1.5rem;
+        padding-left: 0.5rem;
+      }
+      .markdown-body ul {
+        list-style-type: disc;
+      }
+      .markdown-body ul ul {
+        list-style-type: circle;
+        margin-top: 0.25rem;
+        margin-bottom: 0.25rem;
+      }
+      .markdown-body ol {
+        list-style-type: decimal;
+      }
+      .markdown-body li {
+        margin: 0.35rem 0;
+        line-height: 1.5;
+        padding-left: 0.25rem;
+      }
+      .markdown-body li > p:first-child {
+        margin-top: 0;
+      }
+      .markdown-body strong {
+        font-weight: 600;
+      }
+      .markdown-body em {
+        font-style: italic;
+      }
+      .markdown-body code {
+        background: rgba(15, 23, 42, 0.06);
+        border-radius: 0.3rem;
+        padding: 0.08rem 0.25rem;
+        font-size: 0.85rem;
+      }
+      body.dark .markdown-body code {
+        background: rgba(15, 23, 42, 0.9);
+      }
+      .markdown-body pre {
+        background: rgba(15, 23, 42, 0.05);
+        border-radius: 0.5rem;
+        padding: 0.55rem 0.75rem;
+        overflow-x: auto;
+        font-size: 0.85rem;
+      }
+      body.dark .markdown-body pre {
+        background: rgba(15, 23, 42, 0.95);
+      }
+      .markdown-body table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 0.75rem 0;
+        font-size: 0.9rem;
+      }
+      .markdown-body th,
+      .markdown-body td {
+        border: 1px solid rgba(148, 163, 184, 0.4);
+        padding: 0.5rem 0.65rem;
+        text-align: left;
+      }
+      .markdown-body th {
+        background: rgba(15, 23, 42, 0.06);
+        font-weight: 600;
+      }
+      body.dark .markdown-body th {
+        background: rgba(255, 255, 255, 0.06);
+      }
+      body.dark .markdown-body th,
+      body.dark .markdown-body td {
+        border-color: rgba(148, 163, 184, 0.3);
+      }
+      @media print {
+        body {
+          background: white !important;
+        }
+        .page {
+          box-shadow: none;
+          margin: 0;
+          border-radius: 0;
+        }
+      }
+      @media (max-width: 640px) {
+        .page {
+          margin-inline: 0.9rem;
+          padding-inline: 1.1rem;
+        }
+        .page-header {
+          flex-direction: column;
+          align-items: flex-start;
+        }
+      }
+    </style>
+  </head>
+  <body class="light">
+    <main class="page">
+      <header class="page-header">
+        <div class="page-title">${title.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</div>
+        <div class="page-meta">Generated study material</div>
+      </header>
+      <article class="markdown-body" id="content"></article>
+    </main>
+    <script>
+      const md = ${JSON.stringify(content)};
+      function escapeHtml(str) {
+        return str
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      }
+      function applyBoldItalic(str) {
+        return str
+          .replace(/\\*\\*\\*([^*]*?)\\*\\*\\*/g, "<strong><em>$1</em></strong>")
+          .replace(/\\*\\*([^*]*?)\\*\\*/g, "<strong>$1</strong>")
+          .replace(/\\*([^*]+?)\\*/g, "<em>$1</em>");
+      }
+      function formatInline(str) {
+        return applyBoldItalic(escapeHtml(str));
+      }
+      function parseTableRow(line) {
+        const cells = line.split("|").map(function(s) { return s.trim(); }).filter(function(s) { return s.length > 0; });
+        return cells.length > 0 ? cells : null;
+      }
+      function isTableSeparator(line) {
+        return /^\\|?[\\s\\-:]+(\\|[\\s\\-:]+)*\\|?$/.test(line.trim());
+      }
+      function renderMarkdownBasic(md) {
+        const lines = md.split(/\\r?\\n/);
+        let html = "";
+        let inList = false;
+        let inOl = false;
+        let needCloseLi = false;
+        const flushList = () => {
+          if (inList) { html += "</ul>"; inList = false; }
+          if (needCloseLi) { html += "</li>"; needCloseLi = false; }
+          if (inOl) { html += "</ol>"; inOl = false; }
+        };
+        for (var i = 0; i < lines.length; i++) {
+          const line = lines[i].trimEnd();
+          if (!line.trim()) {
+            flushList();
+            html += "<p></p>";
+            continue;
+          }
+          if (/^#{1,6}\\s+/.test(line)) {
+            flushList();
+            const level = line.match(/^#{1,6}/)[0].length;
+            const text = formatInline(line.replace(/^#{1,6}\\s+/, ""));
+            html += "<h" + level + ">" + text + "</h" + level + ">";
+            continue;
+          }
+          if (/^\\d+\\.\\s+/.test(line)) {
+            const text = formatInline(line.replace(/^\\d+\\.\\s+/, ""));
+            if (inList) { html += "</ul>"; inList = false; }
+            if (needCloseLi) { html += "</li>"; needCloseLi = false; }
+            if (!inOl) { html += "<ol>"; inOl = true; }
+            html += "<li>" + text;
+            needCloseLi = true;
+            continue;
+          }
+          if (/^[-*]\\s+/.test(line)) {
+            const text = formatInline(line.replace(/^[-*]\\s+/, ""));
+            if (inOl && needCloseLi && !inList) {
+              html += "<ul>";
+              inList = true;
+            } else if (!inList) {
+              if (needCloseLi) { html += "</li>"; needCloseLi = false; }
+              if (inOl) { html += "</ol>"; inOl = false; }
+              html += "<ul>";
+              inList = true;
+            }
+            html += "<li>" + text + "</li>";
+            continue;
+          }
+          if (/^\\|.+\\|$/.test(line)) {
+            const next = lines[i + 1];
+            if (next && isTableSeparator(next)) {
+              flushList();
+              html += "<table>";
+              var headerCells = parseTableRow(line);
+              if (headerCells) {
+                html += "<thead><tr>";
+                for (var c = 0; c < headerCells.length; c++) {
+                  html += "<th>" + formatInline(headerCells[c]) + "</th>";
+                }
+                html += "</tr></thead><tbody>";
+              }
+              i += 2;
+              while (i < lines.length && /^\\|.+\\|$/.test(lines[i].trim())) {
+                var rowCells = parseTableRow(lines[i]);
+                if (rowCells) {
+                  html += "<tr>";
+                  for (var d = 0; d < rowCells.length; d++) {
+                    html += "<td>" + formatInline(rowCells[d]) + "</td>";
+                  }
+                  html += "</tr>";
+                }
+                i++;
+              }
+              html += "</tbody></table>";
+              i--;
+              continue;
+            }
+          }
+          flushList();
+          html += "<p>" + formatInline(line) + "</p>";
+        }
+        flushList();
+        return html;
+      }
+      document.getElementById("content").innerHTML = renderMarkdownBasic(md);
+    </script>
+  </body>
+</html>`;
+
+      const blob = new Blob([html], { type: "text/html;charset=utf-8" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      const suffix =
-        typeKey === "reviewSheet"
-          ? "review"
-          : typeKey === "studySheet"
-          ? "study"
-          : "concept-map";
       a.href = url;
-      a.download = `${selectedFile.name.replace(/\.[^.]+$/, "")}-${suffix}.md`;
+      a.download = typeKey === "multiNoteOutline" ? "multi-note-outline.html" : `${baseName}-${suffix}.html`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     },
-    [selectedFile]
-  );
-
-  const handleDownloadPdf = useCallback(
-    (typeKey) => {
-      if (!selectedFile) return;
-      const content = selectedFile.outputs[typeKey];
-      if (!content) {
-        setGlobalError("Nothing to download for this output type yet.");
-        return;
-      }
-
-      const suffix =
-        typeKey === "reviewSheet"
-          ? "review"
-          : typeKey === "studySheet"
-          ? "study"
-          : "concept-map";
-
-      const baseName = selectedFile.name.replace(/\.[^.]+$/, "");
-      const title = `${baseName} – ${suffix.replace("-", " ")}`;
-
-      const doc = new jsPDF({
-        unit: "pt",
-        format: "a4"
-      });
-
-      const pageWidth = doc.internal.pageSize.getWidth();
-      const pageHeight = doc.internal.pageSize.getHeight();
-      const marginX = 48;
-      const marginTop = 60;
-      const marginBottom = 60;
-
-      doc.setFont("Helvetica", "bold");
-      doc.setFontSize(16);
-      doc.text(title, marginX, marginTop);
-
-      doc.setFont("Helvetica", "normal");
-      doc.setFontSize(11);
-
-      const availableWidth = pageWidth - marginX * 2;
-      const wrappedLines = doc.splitTextToSize(content, availableWidth);
-
-      let cursorY = marginTop + 24;
-
-      wrappedLines.forEach((line) => {
-        if (cursorY > pageHeight - marginBottom) {
-          doc.addPage();
-          cursorY = marginTop;
-        }
-        doc.text(line, marginX, cursorY);
-        cursorY += 14;
-      });
-
-      doc.save(`${baseName}-${suffix}.pdf`);
-    },
-    [selectedFile, setGlobalError]
+    [selectedFile, multiNoteOutlineContent, setGlobalError]
   );
 
   const renderStatusBadge = (file) => {
@@ -491,14 +720,6 @@ export default function App() {
 
             <button
               type="button"
-              className="btn secondary"
-              onClick={rescanFiles}
-            >
-              Rescan
-            </button>
-
-            <button
-              type="button"
               className="btn accent"
               onClick={handleProcessSelected}
               disabled={isProcessing || !selectedFile}
@@ -547,6 +768,19 @@ export default function App() {
                 }
               />
               Text-Based Concept Map
+            </label>
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={outputSelection.multiNoteOutline}
+                onChange={(e) =>
+                  setOutputSelection((prev) => ({
+                    ...prev,
+                    multiNoteOutline: e.target.checked
+                  }))
+                }
+              />
+              Multi-note outline (2+ files)
             </label>
           </div>
 
@@ -611,60 +845,44 @@ export default function App() {
                 <button
                   type="button"
                   className="btn tiny"
-                  onClick={() => handleDownload("reviewSheet")}
+                  onClick={() => handleDownloadHtml("reviewSheet")}
                   disabled={!selectedFile || !selectedFile.outputs.reviewSheet}
                 >
-                  Download Review Sheet (.md)
+                  Review Sheet (web page)
                 </button>
                 <button
                   type="button"
                   className="btn tiny"
-                  onClick={() => handleDownloadPdf("reviewSheet")}
-                  disabled={!selectedFile || !selectedFile.outputs.reviewSheet}
-                >
-                  Review Sheet (.pdf)
-                </button>
-                <button
-                  type="button"
-                  className="btn tiny"
-                  onClick={() => handleDownload("studySheet")}
+                  onClick={() => handleDownloadHtml("studySheet")}
                   disabled={!selectedFile || !selectedFile.outputs.studySheet}
                 >
-                  Download Study Sheet (.md)
+                  Study Sheet (web page)
                 </button>
                 <button
                   type="button"
                   className="btn tiny"
-                  onClick={() => handleDownloadPdf("studySheet")}
-                  disabled={!selectedFile || !selectedFile.outputs.studySheet}
-                >
-                  Study Sheet (.pdf)
-                </button>
-                <button
-                  type="button"
-                  className="btn tiny"
-                  onClick={() => handleDownload("conceptMap")}
+                  onClick={() => handleDownloadHtml("conceptMap")}
                   disabled={!selectedFile || !selectedFile.outputs.conceptMap}
                 >
-                  Download Concept Map (.md)
+                  Concept Map (web page)
                 </button>
                 <button
                   type="button"
                   className="btn tiny"
-                  onClick={() => handleDownloadPdf("conceptMap")}
-                  disabled={!selectedFile || !selectedFile.outputs.conceptMap}
+                  onClick={() => handleDownloadHtml("multiNoteOutline")}
+                  disabled={!multiNoteOutlineContent}
                 >
-                  Concept Map (.pdf)
+                  Multi-note outline (web page)
                 </button>
               </div>
             </div>
 
-            {!selectedFile ? (
+            {!selectedFile && !multiNoteOutlineContent ? (
               <div className="empty-state large">
                 Select a file to view generated study materials.
               </div>
             ) : (
-              <PreviewTabs file={selectedFile} />
+              <PreviewTabs file={selectedFile} multiNoteOutlineContent={multiNoteOutlineContent} />
             )}
           </section>
         </section>
@@ -677,14 +895,17 @@ export default function App() {
   );
 }
 
-function PreviewTabs({ file }) {
-  const [activeTab, setActiveTab] = useState("review");
+function PreviewTabs({ file, multiNoteOutlineContent }) {
+  const hasMultiNote = Boolean(multiNoteOutlineContent);
+  const [activeTab, setActiveTab] = useState(hasMultiNote ? "multiNote" : "review");
 
   const tabContent = useMemo(() => {
-    if (activeTab === "review") return file.outputs.reviewSheet;
-    if (activeTab === "study") return file.outputs.studySheet;
-    return file.outputs.conceptMap;
-  }, [activeTab, file.outputs]);
+    if (activeTab === "multiNote") return multiNoteOutlineContent || "";
+    if (!file) return "";
+    if (activeTab === "review") return file.outputs?.reviewSheet ?? "";
+    if (activeTab === "study") return file.outputs?.studySheet ?? "";
+    return file.outputs?.conceptMap ?? "";
+  }, [activeTab, file, multiNoteOutlineContent]);
 
   const tabIsEmpty = !tabContent;
 
@@ -693,38 +914,47 @@ function PreviewTabs({ file }) {
       <div className="tabs-header">
         <button
           type="button"
-          className={
-            "tab" + (activeTab === "review" ? " tab-active" : "")
-          }
+          className={"tab" + (activeTab === "review" ? " tab-active" : "")}
           onClick={() => setActiveTab("review")}
         >
           Review Sheet
         </button>
         <button
           type="button"
-          className={
-            "tab" + (activeTab === "study" ? " tab-active" : "")
-          }
+          className={"tab" + (activeTab === "study" ? " tab-active" : "")}
           onClick={() => setActiveTab("study")}
         >
           Study Sheet
         </button>
         <button
           type="button"
-          className={
-            "tab" + (activeTab === "concept" ? " tab-active" : "")
-          }
+          className={"tab" + (activeTab === "concept" ? " tab-active" : "")}
           onClick={() => setActiveTab("concept")}
         >
           Concept Map
         </button>
+        {hasMultiNote && (
+          <button
+            type="button"
+            className={"tab" + (activeTab === "multiNote" ? " tab-active" : "")}
+            onClick={() => setActiveTab("multiNote")}
+          >
+            Multi-note outline
+          </button>
+        )}
       </div>
 
       <div className="tabs-body markdown-body">
         {tabIsEmpty ? (
           <div className="empty-state">
-            Nothing generated yet for this view. Run{" "}
-            <span className="mono">Process</span> with this output type selected.
+            {activeTab === "multiNote"
+              ? "Select 2+ files, check Multi-note outline, and click Process."
+              : "Nothing generated yet for this view. Run "}
+            {activeTab !== "multiNote" && (
+              <>
+                <span className="mono">Process</span> with this output type selected.
+              </>
+            )}
           </div>
         ) : (
           <ReactMarkdown>{tabContent}</ReactMarkdown>
