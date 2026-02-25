@@ -426,21 +426,74 @@ export default function App() {
       .markdown-body h2,
       .markdown-body h3,
       .markdown-body h4 {
-        margin-top: 1.1rem;
-        margin-bottom: 0.45rem;
         font-weight: 600;
+        padding: 0.5rem 0.75rem;
+        margin-left: -0.75rem;
+        margin-right: -0.75rem;
+        padding-left: 0.75rem;
+        border-radius: 0.4rem;
       }
-      .markdown-body h1 { font-size: 1.4rem; }
-      .markdown-body h2 { font-size: 1.2rem; border-bottom: 1px solid rgba(148, 163, 184, 0.5); padding-bottom: 0.15rem; }
-      .markdown-body h3 { font-size: 1.05rem; }
-      .markdown-body h4 { font-size: 0.98rem; font-style: italic; }
+      .markdown-body h1 {
+        font-size: 1.4rem;
+        margin-top: 2rem;
+        margin-bottom: 0.85rem;
+        background: rgba(59, 130, 246, 0.12);
+        border-left: 4px solid #2563eb;
+        color: #1e40af;
+      }
+      .markdown-body h1:first-child { margin-top: 0; }
+      .markdown-body h2 {
+        font-size: 1.2rem;
+        margin-top: 1.75rem;
+        margin-bottom: 0.65rem;
+        background: rgba(34, 197, 94, 0.1);
+        border-left: 4px solid #059669;
+        color: #047857;
+      }
+      .markdown-body h3 {
+        font-size: 1.05rem;
+        margin-top: 1.4rem;
+        margin-bottom: 0.5rem;
+        background: rgba(239, 68, 68, 0.08);
+        border-left: 4px solid #dc2626;
+        color: #b91c1c;
+      }
+      .markdown-body h4 {
+        font-size: 0.98rem;
+        font-style: italic;
+        margin-top: 1.15rem;
+        margin-bottom: 0.45rem;
+        background: rgba(148, 163, 184, 0.12);
+        border-left: 3px solid #64748b;
+        color: #475569;
+      }
+      body.dark .markdown-body h1 {
+        background: rgba(59, 130, 246, 0.2);
+        border-left-color: #3b82f6;
+        color: #93c5fd;
+      }
+      body.dark .markdown-body h2 {
+        background: rgba(34, 197, 94, 0.15);
+        border-left-color: #10b981;
+        color: #6ee7b7;
+      }
+      body.dark .markdown-body h3 {
+        background: rgba(239, 68, 68, 0.15);
+        border-left-color: #ef4444;
+        color: #fca5a5;
+      }
+      body.dark .markdown-body h4 {
+        background: rgba(148, 163, 184, 0.2);
+        border-left-color: #94a3b8;
+        color: #cbd5e1;
+      }
       .markdown-body p {
-        margin: 0.5rem 0;
+        margin: 0.7rem 0;
         line-height: 1.55;
       }
       .markdown-body ul,
       .markdown-body ol {
-        margin: 0.6rem 0 0.6rem 1.5rem;
+        margin: 0.75rem 0 0.85rem 1.5rem;
         padding-left: 0.5rem;
       }
       .markdown-body ul {
@@ -490,7 +543,7 @@ export default function App() {
       .markdown-body table {
         width: 100%;
         border-collapse: collapse;
-        margin: 0.75rem 0;
+        margin: 1rem 0 1.25rem;
         font-size: 0.9rem;
       }
       .markdown-body th,
