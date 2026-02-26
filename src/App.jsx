@@ -1,15 +1,46 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { generateWithDeepSeek } from "./deepseekClient.js";
 import {
   REVIEW_SHEET_PROMPT,
-  STUDY_SHEET_PROMPT,
   CONCEPT_MAP_PROMPT,
   MULTI_NOTE_OUTLINE_PROMPT,
-  REVIEW_QUESTIONS_PROMPT,
+  REVIEW_QUESTIONS_QUIZ_PROMPT,
+  REVIEW_QUESTIONS_QUIZ_PROMPT_TWO_CORRECT,
+  REVIEW_QUESTIONS_REGENERATE_PROMPT,
+  REVIEW_QUESTIONS_REGENERATE_PROMPT_TWO_CORRECT,
+  REVIEW_QUESTIONS_FEEDBACK_PROMPT,
   buildUserMessageWithNotes,
-  buildUserMessageWithMultipleNotes
+  buildUserMessageWithMultipleNotes,
+  buildQuizFeedbackUserMessage
 } from "./prompts.js";
+
+function normalizeCorrectIndices(q) {
+  if (Array.isArray(q.correctIndices) && q.correctIndices.length >= 1) {
+    const indices = q.correctIndices
+      .map((n) => Math.min(3, Math.max(0, parseInt(n, 10) || 0)))
+      .filter((n, i, arr) => arr.indexOf(n) === i)
+      .sort((a, b) => a - b);
+    return indices.length >= 1 ? indices : [0];
+  }
+  const single = Math.min(3, Math.max(0, parseInt(q.correctIndex, 10) || 0));
+  return [single];
+}
+
+function parseQuizJson(raw) {
+  let str = String(raw).trim();
+  const codeBlock = str.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (codeBlock) str = codeBlock[1].trim();
+  const data = JSON.parse(str);
+  const list = Array.isArray(data) ? data : data.questions;
+  if (!Array.isArray(list) || list.length === 0) return null;
+  const questions = list.slice(0, 10).map((q) => ({
+    question: q.question || "",
+    options: Array.isArray(q.options) ? q.options.slice(0, 4) : [],
+    correctIndices: normalizeCorrectIndices(q)
+  })).filter((q) => q.question && q.options.length >= 2);
+  return questions.length >= 1 ? questions : null;
+}
 
 const SUPPORT_EXTENSIONS = [".txt", ".md"];
 
@@ -35,24 +66,27 @@ function getApiStatus(apiError, isOnline) {
 
 const initialOutputs = {
   reviewSheet: "",
-  studySheet: "",
   conceptMap: "",
-  reviewQuestions: ""
+  reviewQuestionsQuiz: null
 };
 
 export default function App() {
   const [files, setFiles] = useState([]);
+  const filesRef = useRef(files);
+  filesRef.current = files;
   const [selectedFileId, setSelectedFileId] = useState(null);
   const [selectedFileIds, setSelectedFileIds] = useState([]);
   const [outputSelection, setOutputSelection] = useState({
     reviewSheet: false,
-    studySheet: false,
     conceptMap: false,
     reviewQuestions: false,
+    includeTwoCorrectQuestions: false,
     multiNoteOutline: false
   });
   const [multiNoteOutlineContent, setMultiNoteOutlineContent] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isSubmittingQuiz, setIsSubmittingQuiz] = useState(false);
+  const [isRegeneratingQuiz, setIsRegeneratingQuiz] = useState(false);
   const [globalError, setGlobalError] = useState("");
   const [apiError, setApiError] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -144,26 +178,6 @@ export default function App() {
     event.target.value = "";
   }, [selectedFileId]);
 
-  const ensureFileTextLoaded = useCallback(
-    async (fileItem) => {
-      if (fileItem.text) return fileItem.text;
-      if (!fileItem.fileObject) {
-        throw new Error("File content is not available in memory.");
-      }
-      const text = await readTextFile(fileItem.fileObject);
-      if (!text.trim()) {
-        throw new Error("File is empty.");
-      }
-      setFiles((prev) =>
-        prev.map((f) =>
-          f.id === fileItem.id ? { ...f, text } : f
-        )
-      );
-      return text;
-    },
-    []
-  );
-
   const updateFileStatus = useCallback((id, patch) => {
     setFiles((prev) =>
       prev.map((f) => (f.id === id ? { ...f, ...patch } : f))
@@ -171,19 +185,38 @@ export default function App() {
   }, []);
 
   const processOutputsForFile = useCallback(
-    async (fileItem, selection) => {
+    async (fileId, selection) => {
       const selectedAny =
         selection.reviewSheet ||
-        selection.studySheet ||
         selection.conceptMap ||
         selection.reviewQuestions;
       if (!selectedAny) {
         throw new Error("Please select at least one output type.");
       }
 
-      const text = await ensureFileTextLoaded(fileItem);
+      // Always look up the latest file from the ref to avoid stale closures
+      const latestFile = filesRef.current.find((f) => f.id === fileId);
+      if (!latestFile) throw new Error("File not found.");
 
-      const newOutputs = { ...fileItem.outputs };
+      let text;
+      if (latestFile.fileObject) {
+        text = await readTextFile(latestFile.fileObject);
+      } else if (latestFile.text) {
+        text = latestFile.text;
+      } else {
+        throw new Error("File content is not available.");
+      }
+      if (!text.trim()) {
+        throw new Error("File is empty.");
+      }
+      setFiles((prev) =>
+        prev.map((f) =>
+          f.id === fileId ? { ...f, text } : f
+        )
+      );
+
+      const freshFile = filesRef.current.find((f) => f.id === fileId);
+      const newOutputs = { ...(freshFile || latestFile).outputs };
 
       const userMessage = buildUserMessageWithNotes(text);
 
@@ -195,14 +228,6 @@ export default function App() {
         newOutputs.reviewSheet = content;
       }
 
-      if (selection.studySheet) {
-        const content = await generateWithDeepSeek(
-          STUDY_SHEET_PROMPT,
-          userMessage
-        );
-        newOutputs.studySheet = content;
-      }
-
       if (selection.conceptMap) {
         const content = await generateWithDeepSeek(
           CONCEPT_MAP_PROMPT,
@@ -212,18 +237,19 @@ export default function App() {
       }
 
       if (selection.reviewQuestions) {
-        const content = await generateWithDeepSeek(
-          REVIEW_QUESTIONS_PROMPT,
-          userMessage
-        );
-        newOutputs.reviewQuestions = content;
+        const quizPrompt = selection.includeTwoCorrectQuestions
+          ? REVIEW_QUESTIONS_QUIZ_PROMPT_TWO_CORRECT
+          : REVIEW_QUESTIONS_QUIZ_PROMPT;
+        const content = await generateWithDeepSeek(quizPrompt, userMessage);
+        const questions = parseQuizJson(content);
+        newOutputs.reviewQuestionsQuiz = questions ? { questions } : { raw: content };
       }
 
-      updateFileStatus(fileItem.id, {
+      updateFileStatus(fileId, {
         outputs: newOutputs
       });
     },
-    [ensureFileTextLoaded, updateFileStatus]
+    [updateFileStatus]
   );
 
   const selectedFile = useMemo(
@@ -248,14 +274,16 @@ export default function App() {
   const handleProcessSelected = useCallback(async () => {
     setGlobalError("");
     setApiError("");
-    if (!selectedFile) {
+
+    const currentFiles = filesRef.current;
+    const currentSelectedFile = currentFiles.find((f) => f.id === selectedFileId);
+    if (!currentSelectedFile) {
       setGlobalError("No file selected. Please choose a file from the list first.");
       return;
     }
 
     const selectedAny =
       outputSelection.reviewSheet ||
-      outputSelection.studySheet ||
       outputSelection.conceptMap ||
       outputSelection.reviewQuestions ||
       outputSelection.multiNoteOutline;
@@ -266,8 +294,8 @@ export default function App() {
 
     const targetIds =
       selectedFileIds && selectedFileIds.length
-        ? selectedFileIds
-        : [selectedFile.id];
+        ? [...selectedFileIds]
+        : [currentSelectedFile.id];
 
     if (outputSelection.multiNoteOutline && targetIds.length < 2) {
       setGlobalError("Multi-note outline requires at least 2 files. Check two or more files in the list.");
@@ -280,17 +308,16 @@ export default function App() {
     try {
       if (
         outputSelection.reviewSheet ||
-        outputSelection.studySheet ||
         outputSelection.conceptMap ||
         outputSelection.reviewQuestions
       ) {
         for (const id of targetIds) {
-          const file = files.find((f) => f.id === id);
+          const file = filesRef.current.find((f) => f.id === id);
           if (!file) continue;
 
           updateFileStatus(id, { status: "processing", error: "" });
           try {
-            await processOutputsForFile(file, outputSelection);
+            await processOutputsForFile(id, outputSelection);
             updateFileStatus(id, { status: "done" });
           } catch (err) {
             const message = err?.message || "Failed to process file.";
@@ -306,10 +333,15 @@ export default function App() {
         try {
           const entries = [];
           for (const id of targetIds) {
-            const file = files.find((f) => f.id === id);
+            const file = filesRef.current.find((f) => f.id === id);
             if (!file) continue;
-            const text = await ensureFileTextLoaded(file);
-            entries.push({ name: file.name, text });
+            let text;
+            if (file.fileObject) {
+              text = await readTextFile(file.fileObject);
+            } else {
+              text = file.text || "";
+            }
+            if (text.trim()) entries.push({ name: file.name, text });
           }
           if (entries.length >= 2) {
             const userMessage = buildUserMessageWithMultipleNotes(entries);
@@ -330,7 +362,145 @@ export default function App() {
     } finally {
       setIsProcessing(false);
     }
-  }, [files, outputSelection, processOutputsForFile, selectedFile, selectedFileIds, updateFileStatus, ensureFileTextLoaded]);
+  }, [selectedFileId, selectedFileIds, outputSelection, processOutputsForFile, updateFileStatus]);
+
+  const handleQuizAnswer = useCallback((fileId, questionIndex, optionIndex, multiSelect) => {
+    setFiles((prev) =>
+      prev.map((f) => {
+        if (f.id !== fileId) return f;
+        const current = f.quizUserAnswers || Array(10).fill(null);
+        const next = [...current];
+        if (multiSelect) {
+          const existing = Array.isArray(current[questionIndex])
+            ? current[questionIndex]
+            : current[questionIndex] != null
+            ? [current[questionIndex]]
+            : [];
+          const set = new Set(existing);
+          if (set.has(optionIndex)) set.delete(optionIndex);
+          else set.add(optionIndex);
+          next[questionIndex] = [...set].sort((a, b) => a - b);
+        } else {
+          next[questionIndex] = optionIndex;
+        }
+        return { ...f, quizUserAnswers: next };
+      })
+    );
+  }, []);
+
+  const handleSubmitQuiz = useCallback(
+    async (fileId) => {
+      const file = filesRef.current.find((f) => f.id === fileId);
+      if (!file?.outputs?.reviewQuestionsQuiz?.questions) return;
+      const questions = file.outputs.reviewQuestionsQuiz.questions;
+      const userAnswers = file.quizUserAnswers || [];
+      const anyAnswered = userAnswers.some((a, i) => {
+        if (i >= questions.length) return false;
+        if (a == null) return false;
+        return Array.isArray(a) ? a.length > 0 : true;
+      });
+      if (!anyAnswered) {
+        updateFileStatus(fileId, {
+          quizFeedback: "Select your answers above, then click Submit to get feedback on wrong ones."
+        });
+        return;
+      }
+      const wrongEntries = [];
+      const labels = ["A", "B", "C", "D"];
+      const formatOptions = (opts, indices) =>
+        (Array.isArray(indices) ? indices : [indices])
+          .map((idx) => `${labels[idx]}) ${(opts[idx] || "").trim()}`)
+          .join("; ");
+      for (let i = 0; i < questions.length; i++) {
+        const q = questions[i];
+        const chosen = userAnswers[i];
+        if (chosen == null) continue;
+        const userIndices = Array.isArray(chosen) ? chosen : [chosen];
+        const correctIndices = q.correctIndices ?? (q.correctIndex != null ? [q.correctIndex] : []);
+        const match =
+          userIndices.length === correctIndices.length &&
+          userIndices.every((idx) => correctIndices.includes(idx));
+        if (!match) {
+          wrongEntries.push({
+            question: q.question,
+            correctText: formatOptions(q.options, correctIndices),
+            userText: formatOptions(q.options, userIndices)
+          });
+        }
+      }
+      setIsSubmittingQuiz(true);
+      setGlobalError("");
+      setApiError("");
+      try {
+        const feedback =
+          wrongEntries.length === 0
+            ? "All correct! Well done."
+            : await generateWithDeepSeek(
+                REVIEW_QUESTIONS_FEEDBACK_PROMPT,
+                buildQuizFeedbackUserMessage(wrongEntries)
+              );
+        updateFileStatus(fileId, { quizFeedback: feedback });
+      } catch (err) {
+        const message = err?.message || "Failed to get feedback.";
+        setGlobalError(message);
+        if (message.toLowerCase().includes("deepseek")) setApiError(message);
+      } finally {
+        setIsSubmittingQuiz(false);
+      }
+    },
+    [updateFileStatus]
+  );
+
+  const handleRegenerateQuiz = useCallback(
+    async (fileId) => {
+      const file = filesRef.current.find((f) => f.id === fileId);
+      if (!file) return;
+      let text;
+      if (file.fileObject) {
+        text = await readTextFile(file.fileObject);
+      } else {
+        text = file.text || "";
+      }
+      if (!text.trim()) {
+        setGlobalError("File content is not available.");
+        return;
+      }
+      setIsRegeneratingQuiz(true);
+      setGlobalError("");
+      setApiError("");
+      const currentFile = filesRef.current.find((f) => f.id === fileId);
+      updateFileStatus(fileId, {
+        outputs: { ...(currentFile || file).outputs, reviewQuestionsQuiz: null },
+        quizUserAnswers: undefined,
+        quizFeedback: undefined
+      });
+      const regenPrompt = outputSelection.includeTwoCorrectQuestions
+        ? REVIEW_QUESTIONS_REGENERATE_PROMPT_TWO_CORRECT
+        : REVIEW_QUESTIONS_REGENERATE_PROMPT;
+      try {
+        const content = await generateWithDeepSeek(
+          regenPrompt,
+          buildUserMessageWithNotes(text)
+        );
+        const questions = parseQuizJson(content);
+        if (questions) {
+          const latest = filesRef.current.find((f) => f.id === fileId);
+          updateFileStatus(fileId, {
+            outputs: { ...(latest || file).outputs, reviewQuestionsQuiz: { questions } }
+          });
+        } else {
+          setGlobalError("Could not parse new questions. Try again.");
+        }
+      } catch (err) {
+        const message = err?.message || "Failed to regenerate quiz.";
+        setGlobalError(message);
+        if (message.toLowerCase().includes("deepseek")) setApiError(message);
+      } finally {
+        setIsRegeneratingQuiz(false);
+      }
+    },
+    [outputSelection.includeTwoCorrectQuestions, updateFileStatus]
+  );
 
   const handleDownloadHtml = useCallback(
     (typeKey) => {
@@ -358,11 +528,7 @@ export default function App() {
         suffix =
           typeKey === "reviewSheet"
             ? "review"
-            : typeKey === "studySheet"
-            ? "study"
-            : typeKey === "conceptMap"
-            ? "concept-map"
-            : "review-questions";
+            : "concept-map";
         baseName = selectedFile.name.replace(/\.[^.]+$/, "");
         title = `${baseName} – ${suffix.replace("-", " ")}`;
       }
@@ -803,73 +969,81 @@ export default function App() {
             </button>
           </div>
 
-          <div className="control-row outputs-row">
-            <span className="outputs-label">Output types:</span>
-            <label className="checkbox-label">
-              <input
-                type="checkbox"
-                checked={outputSelection.reviewSheet}
-                onChange={(e) =>
-                  setOutputSelection((prev) => ({
-                    ...prev,
-                    reviewSheet: e.target.checked
-                  }))
-                }
-              />
-              Review Sheet
-            </label>
-            <label className="checkbox-label">
-              <input
-                type="checkbox"
-                checked={outputSelection.studySheet}
-                onChange={(e) =>
-                  setOutputSelection((prev) => ({
-                    ...prev,
-                    studySheet: e.target.checked
-                  }))
-                }
-              />
-              One-Page Study Sheet
-            </label>
-            <label className="checkbox-label">
-              <input
-                type="checkbox"
-                checked={outputSelection.conceptMap}
-                onChange={(e) =>
-                  setOutputSelection((prev) => ({
-                    ...prev,
-                    conceptMap: e.target.checked
-                  }))
-                }
-              />
-              Text-Based Concept Map
-            </label>
-            <label className="checkbox-label">
-              <input
-                type="checkbox"
-                checked={outputSelection.reviewQuestions}
-                onChange={(e) =>
-                  setOutputSelection((prev) => ({
-                    ...prev,
-                    reviewQuestions: e.target.checked
-                  }))
-                }
-              />
-              Review Questions
-            </label>
-            <label className="checkbox-label">
-              <input
-                type="checkbox"
-                checked={outputSelection.multiNoteOutline}
-                onChange={(e) =>
-                  setOutputSelection((prev) => ({
-                    ...prev,
-                    multiNoteOutline: e.target.checked
-                  }))
-                }
-              />
-              Multi-note outline (2+ files)
-            </label>
+          <div className="outputs-section">
+            <div className="control-row outputs-row">
+              <span className="outputs-label">Output types:</span>
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={outputSelection.reviewSheet}
+                  onChange={(e) =>
+                    setOutputSelection((prev) => ({
+                      ...prev,
+                      reviewSheet: e.target.checked
+                    }))
+                  }
+                />
+                Review Sheet
+              </label>
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={outputSelection.conceptMap}
+                  onChange={(e) =>
+                    setOutputSelection((prev) => ({
+                      ...prev,
+                      conceptMap: e.target.checked
+                    }))
+                  }
+                />
+                Concept Map
+              </label>
+              <span className="checkbox-group-inline">
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={outputSelection.reviewQuestions}
+                    onChange={(e) =>
+                      setOutputSelection((prev) => ({
+                        ...prev,
+                        reviewQuestions: e.target.checked
+                      }))
+                  }
+                />
+                Review Questions
+                </label>
+                {outputSelection.reviewQuestions && (
+                  <span className="sub-option-inline">
+                    <label className="checkbox-label sub-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={outputSelection.includeTwoCorrectQuestions}
+                        onChange={(e) =>
+                          setOutputSelection((prev) => ({
+                            ...prev,
+                            includeTwoCorrectQuestions: e.target.checked
+                          }))
+                        }
+                      />
+                      incl. two-correct
+                    </label>
+                  </span>
+                )}
+              </span>
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={outputSelection.multiNoteOutline}
+                  onChange={(e) =>
+                    setOutputSelection((prev) => ({
+                      ...prev,
+                      multiNoteOutline: e.target.checked
+                    }))
+                  }
+                />
+                Multi-note outline (2+ files)
+              </label>
+            </div>
           </div>
 
           {globalError && (
@@ -901,7 +1075,10 @@ export default function App() {
                     "file-row" +
                     (file.id === selectedFileId ? " file-row-selected" : "")
                   }
-                  onClick={() => setSelectedFileId(file.id)}
+                  onClick={() => {
+                    setSelectedFileId(file.id);
+                    setSelectedFileIds([file.id]);
+                  }}
                 >
                   <div className="file-row-main">
                     <div className="file-row-main-left">
@@ -941,26 +1118,10 @@ export default function App() {
                 <button
                   type="button"
                   className="btn tiny"
-                  onClick={() => handleDownloadHtml("studySheet")}
-                  disabled={!selectedFile || !selectedFile.outputs.studySheet}
-                >
-                  Study Sheet (web page)
-                </button>
-                <button
-                  type="button"
-                  className="btn tiny"
                   onClick={() => handleDownloadHtml("conceptMap")}
                   disabled={!selectedFile || !selectedFile.outputs.conceptMap}
                 >
                   Concept Map (web page)
-                </button>
-                <button
-                  type="button"
-                  className="btn tiny"
-                  onClick={() => handleDownloadHtml("reviewQuestions")}
-                  disabled={!selectedFile || !selectedFile.outputs.reviewQuestions}
-                >
-                  Review Questions (web page)
                 </button>
                 <button
                   type="button"
@@ -979,8 +1140,14 @@ export default function App() {
               </div>
             ) : (
               <PreviewTabs
+                key={selectedFile?.id ?? "none"}
                 file={selectedFile}
                 multiNoteOutlineContent={multiNoteOutlineContent}
+                onQuizAnswer={handleQuizAnswer}
+                onSubmitQuiz={handleSubmitQuiz}
+                onRegenerateQuiz={handleRegenerateQuiz}
+                isSubmittingQuiz={isSubmittingQuiz}
+                isRegeneratingQuiz={isRegeneratingQuiz}
               />
             )}
           </section>
@@ -994,21 +1161,33 @@ export default function App() {
   );
 }
 
-function PreviewTabs({ file, multiNoteOutlineContent }) {
+function PreviewTabs({
+  file,
+  multiNoteOutlineContent,
+  onQuizAnswer,
+  onSubmitQuiz,
+  onRegenerateQuiz,
+  isSubmittingQuiz,
+  isRegeneratingQuiz
+}) {
   const hasMultiNote = Boolean(multiNoteOutlineContent);
   const [activeTab, setActiveTab] = useState(hasMultiNote ? "multiNote" : "review");
+
+  const quizData = file?.outputs?.reviewQuestionsQuiz;
+  const quizQuestions = quizData?.questions;
+  const quizParseFailed = quizData?.raw != null && !quizQuestions;
 
   const tabContent = useMemo(() => {
     if (activeTab === "multiNote") return multiNoteOutlineContent || "";
     if (!file) return "";
     if (activeTab === "review") return file.outputs?.reviewSheet ?? "";
-    if (activeTab === "study") return file.outputs?.studySheet ?? "";
     if (activeTab === "concept") return file.outputs?.conceptMap ?? "";
-    if (activeTab === "questions") return file.outputs?.reviewQuestions ?? "";
     return "";
   }, [activeTab, file, multiNoteOutlineContent]);
 
-  const tabIsEmpty = !tabContent;
+  const isQuizTab = activeTab === "questions";
+  const showQuiz = isQuizTab && Array.isArray(quizQuestions) && quizQuestions.length > 0;
+  const tabIsEmpty = isQuizTab ? !showQuiz && !quizParseFailed : !tabContent;
 
   return (
     <div className="tabs-root">
@@ -1019,13 +1198,6 @@ function PreviewTabs({ file, multiNoteOutlineContent }) {
           onClick={() => setActiveTab("review")}
         >
           Review Sheet
-        </button>
-        <button
-          type="button"
-          className={"tab" + (activeTab === "study" ? " tab-active" : "")}
-          onClick={() => setActiveTab("study")}
-        >
-          Study Sheet
         </button>
         <button
           type="button"
@@ -1053,12 +1225,38 @@ function PreviewTabs({ file, multiNoteOutlineContent }) {
       </div>
 
       <div className="tabs-body markdown-body">
-        {tabIsEmpty ? (
+        {showQuiz ? (
+          <Quiz
+            fileId={file.id}
+            questions={quizQuestions}
+            userAnswers={file.quizUserAnswers || []}
+            feedback={file.quizFeedback}
+            onSelectAnswer={onQuizAnswer}
+            onSubmit={onSubmitQuiz}
+            onRegenerate={onRegenerateQuiz}
+            isSubmitting={isSubmittingQuiz}
+            isRegenerating={isRegeneratingQuiz}
+          />
+        ) : isQuizTab && quizParseFailed ? (
+          <div className="quiz-empty">
+            <p className="empty-state">Couldn&apos;t parse 10 questions from the response.</p>
+            <button
+              type="button"
+              className="btn accent"
+              onClick={() => onRegenerateQuiz(file.id)}
+              disabled={isRegeneratingQuiz}
+            >
+              {isRegeneratingQuiz ? "Regenerating…" : "Regenerate"}
+            </button>
+          </div>
+        ) : tabIsEmpty ? (
           <div className="empty-state">
             {activeTab === "multiNote"
               ? "Select 2+ files, check Multi-note outline, and click Process."
+              : isQuizTab
+              ? "Check Review Questions and click Process to generate 10 quiz questions."
               : "Nothing generated yet for this view. Run "}
-            {activeTab !== "multiNote" && (
+            {!isQuizTab && activeTab !== "multiNote" && (
               <>
                 <span className="mono">Process</span> with this output type selected.
               </>
@@ -1068,6 +1266,84 @@ function PreviewTabs({ file, multiNoteOutlineContent }) {
           <ReactMarkdown>{tabContent}</ReactMarkdown>
         )}
       </div>
+    </div>
+  );
+}
+
+function Quiz({
+  fileId,
+  questions,
+  userAnswers,
+  feedback,
+  onSelectAnswer,
+  onSubmit,
+  onRegenerate,
+  isSubmitting,
+  isRegenerating
+}) {
+  const labels = ["A", "B", "C", "D"];
+  return (
+    <div className="quiz-root">
+      <ol className="quiz-list">
+        {questions.map((q, qIndex) => {
+          const correctIndices = q.correctIndices ?? (q.correctIndex != null ? [q.correctIndex] : []);
+          const multiSelect = correctIndices.length > 1;
+          const isSelected = (oIndex) =>
+            multiSelect
+              ? Array.isArray(userAnswers[qIndex]) && userAnswers[qIndex].includes(oIndex)
+              : userAnswers[qIndex] === oIndex;
+          return (
+            <li key={qIndex} className="quiz-item">
+              <div className="quiz-question">
+                {q.question}
+                {multiSelect && (
+                  <span className="quiz-multi-hint"> (select 2)</span>
+                )}
+              </div>
+              <div className="quiz-options">
+                {q.options.map((opt, oIndex) => (
+                  <button
+                    key={oIndex}
+                    type="button"
+                    className={
+                      "quiz-option" +
+                      (isSelected(oIndex) ? " quiz-option-selected" : "")
+                    }
+                    onClick={() => onSelectAnswer(fileId, qIndex, oIndex, multiSelect)}
+                  >
+                    <span className="quiz-option-label">{labels[oIndex]}</span>
+                    <span className="quiz-option-text">{opt}</span>
+                  </button>
+                ))}
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+      <div className="quiz-actions">
+        <button
+          type="button"
+          className="btn primary"
+          onClick={() => onSubmit(fileId)}
+          disabled={isSubmitting || isRegenerating}
+        >
+          {isSubmitting ? "Submitting…" : "Submit"}
+        </button>
+        <button
+          type="button"
+          className="btn secondary"
+          onClick={() => onRegenerate(fileId)}
+          disabled={isSubmitting || isRegenerating}
+        >
+          {isRegenerating ? "Regenerating…" : "Regenerate (new 10 questions)"}
+        </button>
+      </div>
+      {feedback && (
+        <div className="quiz-feedback">
+          <h4 className="quiz-feedback-title">Feedback</h4>
+          <ReactMarkdown>{feedback}</ReactMarkdown>
+        </div>
+      )}
     </div>
   );
 }

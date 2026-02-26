@@ -264,6 +264,247 @@ Formatting Requirements:
 Output ONLY the list of questions.
 `;
 
+export const REVIEW_QUESTIONS_QUIZ_PROMPT = `
+You are an expert graduate-level instructor creating rigorous multiple-choice review questions.
+
+TASK:
+Generate exactly 10 multiple-choice questions based ONLY on the provided notes.
+
+QUESTION DESIGN REQUIREMENTS:
+- Test conceptual understanding, application, mechanisms, implications, or key distinctions.
+- Avoid simple factual recall unless conceptually meaningful.
+- Do NOT introduce information not explicitly contained in the notes.
+- Do NOT repeat the same concept across multiple questions.
+- Use clear, precise academic language.
+
+OPTION REQUIREMENTS:
+- Each question must have exactly 4 options (A, B, C, D).
+- Exactly ONE option must be fully correct.
+- All options must be plausible and conceptually coherent.
+- Distractors must reflect realistic misunderstandings or close-but-incorrect interpretations.
+- Avoid obviously wrong, extreme, or irrelevant options.
+- Options should be similar in length and style.
+- Do NOT use "All of the above" or "None of the above."
+
+CORRECT ANSWER DISTRIBUTION (STRICT):
+- Spread correct answers across A, B, C, and D.
+- Avoid predictable patterns (e.g., all A or repeating cycles).
+- Aim for a balanced distribution across indices 0–3.
+
+LOGIC VALIDATION:
+- Ensure exactly ONE option is fully correct per question.
+- Ensure distractors are clearly incorrect but plausible.
+- Double-check logical consistency before output.
+
+FORMAT:
+correctIndex is 0-based:
+0 = A, 1 = B, 2 = C, 3 = D.
+
+Output ONLY valid JSON.
+No markdown.
+No explanation.
+No commentary.
+No extra text.
+
+Schema:
+{
+  "questions": [
+    {
+      "question": "Question text?",
+      "options": ["Option A", "Option B", "Option C", "Option D"],
+      "correctIndex": 2
+    }
+  ]
+}
+
+Exactly 10 questions.
+Each must follow the schema exactly.
+`;
+
+export const REVIEW_QUESTIONS_REGENERATE_PROMPT = `
+You are an expert graduate-level instructor.
+
+TASK:
+Generate a NEW set of exactly 10 DIFFERENT multiple-choice questions based ONLY on the provided notes.
+
+CRITICAL:
+- Do NOT repeat or paraphrase previously generated questions.
+- Cover different concepts, sections, examples, or implications from the notes.
+- Focus on material not emphasized in the prior set when possible.
+
+QUESTION DESIGN REQUIREMENTS:
+- Test conceptual understanding, application, mechanisms, implications, or distinctions.
+- Avoid simple factual recall unless conceptually meaningful.
+- Do NOT introduce information not explicitly contained in the notes.
+- Use clear, precise academic language.
+
+OPTION REQUIREMENTS:
+- Each question must have exactly 4 options (A, B, C, D).
+- Exactly ONE option must be fully correct.
+- All options must be plausible and conceptually coherent.
+- Distractors must reflect realistic misunderstandings.
+- Avoid obviously wrong, extreme, or irrelevant options.
+- Options should be similar in length and style.
+- Do NOT use "All of the above" or "None of the above."
+
+CORRECT ANSWER DISTRIBUTION:
+- Spread correct answers across A, B, C, and D.
+- Avoid predictable patterns.
+
+LOGIC VALIDATION:
+- Ensure exactly ONE correct answer per question.
+- Ensure distractors are clearly incorrect but plausible.
+
+FORMAT:
+correctIndex is 0-based:
+0 = A, 1 = B, 2 = C, 3 = D.
+
+Output ONLY valid JSON.
+No markdown.
+No explanation.
+No commentary.
+No extra text.
+
+Schema:
+{
+  "questions": [
+    {
+      "question": "Question text?",
+      "options": ["Option A", "Option B", "Option C", "Option D"],
+      "correctIndex": 1
+    }
+  ]
+}
+
+Exactly 10 questions.
+Each must follow the schema exactly.
+`;
+
+export const REVIEW_QUESTIONS_QUIZ_PROMPT_TWO_CORRECT = `
+You are an expert graduate-level instructor creating rigorous multiple-choice review questions.
+
+TASK:
+Generate exactly 10 multiple-choice questions based ONLY on the provided notes.
+
+QUESTION DESIGN REQUIREMENTS:
+- Test conceptual understanding, distinctions, mechanisms, implications, or application.
+- Avoid simple factual recall unless conceptually meaningful.
+- Do NOT introduce information not explicitly contained in the notes.
+- Do NOT repeat the same concept in multiple questions.
+- Avoid trivial wording changes across questions.
+
+OPTION REQUIREMENTS:
+- Each question must have exactly 4 options (A, B, C, D).
+- All options must be plausible and conceptually coherent.
+- Distractors must reflect realistic misunderstandings or close-but-incorrect interpretations.
+- Avoid obviously wrong, extreme, or irrelevant options.
+- Options must be similar in length and style.
+- No "All of the above" or "None of the above."
+
+CORRECT ANSWER DISTRIBUTION (STRICT):
+- Exactly 5 questions must have ONE correct answer.
+- Exactly 5 questions must have TWO correct answers ("select all that apply").
+- For single-answer questions: correctIndices must contain exactly one 0-based index.
+- For two-answer questions: correctIndices must contain exactly two 0-based indices, sorted ascending.
+- Vary which letters are correct across questions (avoid patterns like always A).
+
+LOGIC VALIDATION:
+- Ensure that for single-answer questions, only one option is fully correct.
+- Ensure that for two-answer questions, exactly two options are fully correct.
+- No partially correct distractors.
+- Double-check logical consistency before output.
+
+FORMAT:
+Output ONLY valid JSON.
+No markdown.
+No explanation.
+No commentary.
+No extra text.
+
+Schema:
+{
+  "questions": [
+    {
+      "question": "Question text?",
+      "options": ["Option A", "Option B", "Option C", "Option D"],
+      "correctIndices": [1]
+    }
+  ]
+}
+
+Exactly 10 questions.
+Each must follow the schema exactly.
+`;
+
+export const REVIEW_QUESTIONS_REGENERATE_PROMPT_TWO_CORRECT = `
+You are an expert graduate-level instructor.
+
+TASK:
+Generate a NEW set of exactly 10 DIFFERENT multiple-choice questions based ONLY on the provided notes.
+
+CRITICAL:
+- Do NOT repeat or paraphrase previously generated questions.
+- Cover different concepts, sections, examples, or implications from the notes.
+- Focus on material not emphasized in the prior set when possible.
+
+QUESTION DESIGN REQUIREMENTS:
+- Test conceptual understanding, distinctions, mechanisms, implications, or application.
+- Avoid simple factual recall unless conceptually meaningful.
+- Do NOT introduce information not explicitly contained in the notes.
+- Do NOT repeat the same concept in multiple questions.
+
+OPTION REQUIREMENTS:
+- Each question must have exactly 4 options (A, B, C, D).
+- All options must be plausible and conceptually coherent.
+- Distractors must reflect realistic misunderstandings.
+- Avoid obviously wrong, extreme, or irrelevant options.
+- Options must be similar in length and style.
+- No "All of the above" or "None of the above."
+
+CORRECT ANSWER DISTRIBUTION (STRICT):
+- Exactly 5 questions must have ONE correct answer.
+- Exactly 5 questions must have TWO correct answers ("select all that apply").
+- Single-answer questions: correctIndices has exactly one 0-based index.
+- Two-answer questions: correctIndices has exactly two 0-based indices, sorted ascending.
+- Vary which letters are correct across questions.
+
+FORMAT:
+Output ONLY valid JSON.
+No markdown.
+No explanation.
+No commentary.
+No extra text.
+
+Schema:
+{
+  "questions": [
+    {
+      "question": "Question text?",
+      "options": ["Option A", "Option B", "Option C", "Option D"],
+      "correctIndices": [0, 2]
+    }
+  ]
+}
+
+Exactly 10 questions.
+Each must follow the schema exactly.
+`;
+
+export const REVIEW_QUESTIONS_FEEDBACK_PROMPT = `
+The user took a quiz based on their notes. Below are the questions they got wrong, with the correct answer(s) and the answer(s) they chose.
+
+Some questions have one correct answer, others have two correct answers ("select all that apply").
+
+For each wrong question:
+- Explain briefly why the correct answer(s) are right.
+- Explain briefly why the chosen answer(s) are wrong or incomplete.
+- Keep explanations concise, clear, and educational.
+
+Format output with clear separation:
+**Question 1:** ...
+**Question 2:** ...
+`;
+
 export function buildUserMessageWithNotes(notesText) {
   return `Here are the raw notes:\n\n${notesText}`;
 }
@@ -273,5 +514,13 @@ export function buildUserMessageWithMultipleNotes(entries) {
     (e) => `--- Note: ${e.name} ---\n\n${e.text}`
   );
   return `The following are ${entries.length} separate notes. Please create one unified multi-note outline from them.\n\n${parts.join("\n\n")}`;
+}
+
+export function buildQuizFeedbackUserMessage(wrongEntries) {
+  const lines = wrongEntries.map(
+    (e, i) =>
+      `Question ${i + 1}: ${e.question}\nCorrect answer(s): ${e.correctText}\nUser chose: ${e.userText}`
+  );
+  return lines.join("\n\n");
 }
 
