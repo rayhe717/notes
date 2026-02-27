@@ -225,6 +225,12 @@ export default function App() {
       for await (const [name, entry] of handle.entries()) {
         if (entry.kind === "file" && isSupportedFile(name)) {
           const file = await entry.getFile();
+          let text = "";
+          try {
+            text = await readTextFile(file);
+          } catch (_) {
+            // keep text empty on read error
+          }
           newFiles.push({
             id: `${entry.name}-${file.lastModified}-${file.size}-${Math.random().toString(36).slice(2)}`,
             name,
@@ -233,7 +239,7 @@ export default function App() {
             fileObject: file,
             status: "idle",
             error: "",
-            text: "",
+            text: text || "",
             outputs: { ...initialOutputs }
           });
         }
@@ -266,6 +272,12 @@ export default function App() {
         unsupported.push(file.name);
         continue;
       }
+      let text = "";
+      try {
+        text = await readTextFile(file);
+      } catch (_) {
+        // keep text empty on read error
+      }
       newFiles.push({
         id: `${file.name}-${file.lastModified}-${file.size}-${Math.random().toString(36).slice(2)}`,
         name: file.name,
@@ -274,7 +286,7 @@ export default function App() {
         fileObject: file,
         status: "idle",
         error: "",
-        text: "",
+        text: text || "",
         outputs: { ...initialOutputs }
       });
     }
