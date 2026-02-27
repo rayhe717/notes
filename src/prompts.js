@@ -327,10 +327,16 @@ You are an expert graduate-level instructor.
 TASK:
 Generate a NEW set of exactly 10 DIFFERENT multiple-choice questions based ONLY on the provided notes.
 
+REGENERATION CONTEXT (if present in the user message):
+If the user message includes a "REGENERATION CONTEXT" section listing questions they got CORRECT vs WRONG:
+- De-emphasize or avoid topics similar to the questions they got CORRECT.
+- Emphasize and draw more questions from the areas they got WRONG (their mistakes).
+- Also draw questions from parts of the notes that were NOT covered or only lightly covered in the previous quiz.
+Prioritize mistakes and untouched content over material they already answered correctly.
+
 CRITICAL:
 - Do NOT repeat or paraphrase previously generated questions.
 - Cover different concepts, sections, examples, or implications from the notes.
-- Focus on material not emphasized in the prior set when possible.
 
 QUESTION DESIGN REQUIREMENTS:
 - Test conceptual understanding, application, mechanisms, implications, or distinctions.
@@ -401,18 +407,21 @@ OPTION REQUIREMENTS:
 - Options must be similar in length and style.
 - No "All of the above" or "None of the above."
 
-CORRECT ANSWER DISTRIBUTION (STRICT):
-- Exactly 5 questions must have ONE correct answer.
-- Exactly 5 questions must have TWO correct answers ("select all that apply").
-- For single-answer questions: correctIndices must contain exactly one 0-based index.
-- For two-answer questions: correctIndices must contain exactly two 0-based indices, sorted ascending.
+CORRECT ANSWER COUNT (MANDATORY — NO EXCEPTIONS):
+- Each question must have EITHER exactly 1 correct answer OR exactly 2 correct answers. Never 3, never 4.
+- Exactly 5 questions: correctIndices = [i] (one index only).
+- Exactly 5 questions: correctIndices = [i, j] (exactly two indices, sorted ascending).
+- FORBIDDEN: correctIndices with 3 or 4 elements. If the notes list three or more valid points, pick only the two most central for a two-answer question, or combine into one option for a one-answer question. Do not make three or four options correct.
+
+QUESTION DESIGN TO ENFORCE 1 OR 2 CORRECT:
+- When writing "select all that apply" questions, phrase the question or options so that only two options are clearly correct. If the source lists multiple valid items (e.g. "A, B, and C are reasons"), do not make A, B, and C three separate correct options—either (1) combine into one option, or (2) choose the two most important and make the rest distractors.
 - Vary which letters are correct across questions (avoid patterns like always A).
 
 LOGIC VALIDATION:
-- Ensure that for single-answer questions, only one option is fully correct.
-- Ensure that for two-answer questions, exactly two options are fully correct.
+- Before outputting, verify every question: correctIndices has length 1 or 2 only. Never 3 or 4.
+- Single-answer: only one option is fully correct; the other three are wrong.
+- Two-answer: exactly two options are correct; the other two are wrong.
 - No partially correct distractors.
-- Double-check logical consistency before output.
 
 FORMAT:
 Output ONLY valid JSON.
@@ -432,8 +441,7 @@ Schema:
   ]
 }
 
-Exactly 10 questions.
-Each must follow the schema exactly.
+Exactly 10 questions. Each correctIndices array must have length 1 or 2 only.
 `;
 
 export const REVIEW_QUESTIONS_REGENERATE_PROMPT_TWO_CORRECT = `
@@ -442,10 +450,16 @@ You are an expert graduate-level instructor.
 TASK:
 Generate a NEW set of exactly 10 DIFFERENT multiple-choice questions based ONLY on the provided notes.
 
+REGENERATION CONTEXT (if present in the user message):
+If the user message includes a "REGENERATION CONTEXT" section listing questions they got CORRECT vs WRONG:
+- De-emphasize or avoid topics similar to the questions they got CORRECT.
+- Emphasize and draw more questions from the areas they got WRONG (their mistakes).
+- Also draw questions from parts of the notes that were NOT covered or only lightly covered in the previous quiz.
+Prioritize mistakes and untouched content over material they already answered correctly.
+
 CRITICAL:
 - Do NOT repeat or paraphrase previously generated questions.
 - Cover different concepts, sections, examples, or implications from the notes.
-- Focus on material not emphasized in the prior set when possible.
 
 QUESTION DESIGN REQUIREMENTS:
 - Test conceptual understanding, distinctions, mechanisms, implications, or application.
@@ -461,42 +475,26 @@ OPTION REQUIREMENTS:
 - Options must be similar in length and style.
 - No "All of the above" or "None of the above."
 
-CORRECT ANSWER DISTRIBUTION (STRICT):
-- Exactly 5 questions must have ONE correct answer.
-- Exactly 5 questions must have TWO correct answers ("select all that apply").
-- Single-answer questions: correctIndices has exactly one 0-based index.
-- Two-answer questions: correctIndices has exactly two 0-based indices, sorted ascending.
-- Vary which letters are correct across questions.
+CORRECT ANSWER COUNT (MANDATORY — NO EXCEPTIONS):
+- Each question: EITHER exactly 1 correct OR exactly 2 correct. Never 3, never 4.
+- Exactly 5 questions: correctIndices = [i] (one index).
+- Exactly 5 questions: correctIndices = [i, j] (exactly two indices, sorted). 
+- FORBIDDEN: 3 or 4 correct options. If notes list three or more valid points, use only two as correct and make the rest wrong, or combine into one/two options.
 
 FORMAT:
-Output ONLY valid JSON.
-No markdown.
-No explanation.
-No commentary.
-No extra text.
+Output ONLY valid JSON. No markdown, no explanation, no extra text.
 
-Schema:
-{
-  "questions": [
-    {
-      "question": "Question text?",
-      "options": ["Option A", "Option B", "Option C", "Option D"],
-      "correctIndices": [0, 2]
-    }
-  ]
-}
-
-Exactly 10 questions.
-Each must follow the schema exactly.
+Schema: {"questions":[{"question":"...","options":["A","B","C","D"],"correctIndices":[0,2]}]}
+Exactly 10 questions. Every correctIndices must have length 1 or 2 only.
 `;
 
 export const REVIEW_QUESTIONS_FEEDBACK_PROMPT = `
 The user took a quiz based on their notes. Below are the questions they got wrong, with the correct answer(s) and the answer(s) they chose.
 
-Some questions have one correct answer, others have two correct answers ("select all that apply").
+Each question has either one correct answer or exactly two correct answers ("select all that apply"). There are no questions with three or four correct options.
 
 For each wrong question:
-- Explain briefly why the correct answer(s) are right.
+- Explain briefly why the correct answer(s) (one or two) are right.
 - Explain briefly why the chosen answer(s) are wrong or incomplete.
 - Keep explanations concise, clear, and educational.
 
@@ -507,6 +505,36 @@ Format output with clear separation:
 
 export function buildUserMessageWithNotes(notesText) {
   return `Here are the raw notes:\n\n${notesText}`;
+}
+
+export function buildRegenerateContextMessage(questions, userAnswers) {
+  if (!Array.isArray(questions) || questions.length === 0) return "";
+  const correct = [];
+  const wrong = [];
+  for (let i = 0; i < questions.length; i++) {
+    const q = questions[i];
+    const u = userAnswers[i];
+    if (u == null) continue;
+    const userIndices = Array.isArray(u) ? [...u].sort((a, b) => a - b) : [u];
+    const correctIndices = q.correctIndices ?? (q.correctIndex != null ? [q.correctIndex] : []);
+    const match =
+      userIndices.length === correctIndices.length &&
+      userIndices.every((idx) => correctIndices.includes(idx));
+    if (match) correct.push(q.question);
+    else wrong.push(q.question);
+  }
+  if (correct.length === 0 && wrong.length === 0) return "";
+  const lines = [];
+  if (correct.length > 0) {
+    lines.push("QUESTIONS THE USER GOT CORRECT (de-emphasize or avoid similar topics in the new set):");
+    correct.forEach((q) => lines.push("- " + q));
+  }
+  if (wrong.length > 0) {
+    lines.push("QUESTIONS THE USER GOT WRONG (emphasize these areas in the new set):");
+    wrong.forEach((q) => lines.push("- " + q));
+  }
+  lines.push("Also include questions from parts of the notes that were NOT covered or only lightly covered in the previous quiz.");
+  return lines.join("\n\n");
 }
 
 export function buildUserMessageWithMultipleNotes(entries) {

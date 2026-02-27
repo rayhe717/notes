@@ -12,7 +12,8 @@ import {
   REVIEW_QUESTIONS_FEEDBACK_PROMPT,
   buildUserMessageWithNotes,
   buildUserMessageWithMultipleNotes,
-  buildQuizFeedbackUserMessage
+  buildQuizFeedbackUserMessage,
+  buildRegenerateContextMessage
 } from "./prompts.js";
 
 function normalizeCorrectIndices(q) {
@@ -20,7 +21,8 @@ function normalizeCorrectIndices(q) {
     const indices = q.correctIndices
       .map((n) => Math.min(3, Math.max(0, parseInt(n, 10) || 0)))
       .filter((n, i, arr) => arr.indexOf(n) === i)
-      .sort((a, b) => a - b);
+      .sort((a, b) => a - b)
+      .slice(0, 2);
     return indices.length >= 1 ? indices : [0];
   }
   const single = Math.min(3, Math.max(0, parseInt(q.correctIndex, 10) || 0));
@@ -271,6 +273,25 @@ export default function App() {
     []
   );
 
+  const handleRefresh = useCallback(() => {
+    setFiles((prev) =>
+      prev.map((f) => ({
+        ...f,
+        outputs: { ...initialOutputs },
+        quizUserAnswers: undefined,
+        quizFeedback: undefined,
+        status: "idle",
+        error: ""
+      }))
+    );
+    setMultiNoteOutlineContent("");
+    const current = filesRef.current;
+    const firstId = current[0]?.id ?? null;
+    setSelectedFileId(firstId);
+    setSelectedFileIds(firstId ? [firstId] : []);
+    setGlobalError("");
+  }, []);
+
   const handleProcessSelected = useCallback(async () => {
     setGlobalError("");
     setApiError("");
@@ -465,6 +486,21 @@ export default function App() {
         setGlobalError("File content is not available.");
         return;
       }
+      const previousQuestions = file.outputs?.reviewQuestionsQuiz?.questions;
+      const previousAnswers = file.quizUserAnswers;
+      const contextMessage =
+        Array.isArray(previousQuestions) &&
+        previousQuestions.length > 0 &&
+        previousAnswers != null
+          ? buildRegenerateContextMessage(previousQuestions, previousAnswers)
+          : "";
+      const userMessage =
+        contextMessage.trim() === ""
+          ? buildUserMessageWithNotes(text)
+          : buildUserMessageWithNotes(text) +
+            "\n\n--- REGENERATION CONTEXT ---\n" +
+            contextMessage;
+
       setIsRegeneratingQuiz(true);
       setGlobalError("");
       setApiError("");
@@ -480,7 +516,7 @@ export default function App() {
       try {
         const content = await generateWithDeepSeek(
           regenPrompt,
-          buildUserMessageWithNotes(text)
+          userMessage
         );
         const questions = parseQuizJson(content);
         if (questions) {
@@ -966,6 +1002,15 @@ export default function App() {
               disabled={isProcessing || !selectedFile}
             >
               {isProcessing ? "Processing…" : "Process"}
+            </button>
+            <button
+              type="button"
+              className="btn secondary"
+              onClick={handleRefresh}
+              disabled={isProcessing || !files.length}
+              title="Clear all generated material and reset selection to first file"
+            >
+              Refresh
             </button>
           </div>
 
