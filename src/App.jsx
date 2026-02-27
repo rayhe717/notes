@@ -425,6 +425,14 @@ export default function App() {
       }))
     );
     setMultiNoteOutlineContent("");
+    setOutputSelection({
+      reviewSheet: false,
+      conceptMap: false,
+      reviewQuestions: false,
+      includeTwoCorrectQuestions: false,
+      clozeSheet: false,
+      multiNoteOutline: false
+    });
     const current = filesRef.current;
     const firstId = current[0]?.id ?? null;
     setSelectedFileId(firstId);
@@ -1762,7 +1770,7 @@ function ClozeSheet({
                           onSubmitBlank(fileId, blankIndex);
                         }
                       }}
-                      placeholder="_____"
+                      placeholder=""
                       aria-label={`Blank ${blankIndex + 1}`}
                     />
                     {parts[1]}
