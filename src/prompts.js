@@ -1,94 +1,77 @@
 export const REVIEW_SHEET_PROMPT = `
-Transform the following rough notes into master’s-level academic notes for a course on Spirituality in Psychotherapy.
+You are an experienced psychology professor. The user is a psychology student. The notes may be from any psychology-related course or topic. Transform the following rough notes into clear, well-organized academic notes suitable for psychology study and exam preparation.
 
-Use a CLINICAL INTEGRATION format optimized for therapists, not a strict hierarchy.
+Use a structure optimized for learning and exam preparation, not a rigid hierarchy. Adapt section emphasis to the material (e.g. more clinical vs more theoretical).
 
 GENERAL PRINCIPLES
 • Preserve original meaning — do not invent information
 • Improve clarity, precision, and academic tone
 • Integrate conceptual, clinical, ethical, and experiential elements
 • Highlight key models, tools, and distinctions
-• Organize for real-world clinical application and exam preparation
+• Organize for learning and exam preparation
 
-OUTPUT IN MARKDOWN WITH THE FOLLOWING STRUCTURE:
+OUTPUT IN MARKDOWN WITH THE FOLLOWING STRUCTURE (adapt section emphasis to the material):
 
 ## Core Focus / Essential Questions
-Identify the central clinical or conceptual issues addressed by this material.
+Identify the central issues or questions addressed by this material.
 
 ## Key Concepts & Definitions
-Clarify major terms (e.g., spirituality, transcendence, meaning, spiritual health, etc.).
+Clarify major terms and concepts relevant to the notes.
 
-## Clinical Significance
-Explain why this material matters in psychotherapy:
-• Impact on assessment
-• Treatment outcomes
-• Client well-being
-• Diagnostic considerations
+## Significance & Applications
+Explain why this material matters: for theory, research, practice, or assessment—as appropriate to the topic.
 
 ## Theoretical & Conceptual Frameworks
 Organize major models, domains, or perspectives described in the notes.
 
-## Assessment & Clinical Tools
-Summarize any structured approaches, frameworks, or instruments 
-(e.g., spiritual history taking, FICA, HOPE model).
+## Key Tools, Methods, or Instruments (if present)
+Summarize any structured approaches, frameworks, or instruments mentioned.
 
-## Therapeutic Applications
-Describe how spirituality is integrated into practice:
-• Intervention approaches
-• Communication strategies
-• Cultural considerations
-• Collaboration with spiritual resources
+## Applications to Practice or Research (when relevant)
+Describe how the material applies to real-world or professional contexts, as fits the content.
 
-## Ethical & Professional Issues
-Include boundaries, risks, and ethical principles relevant to practice.
+## Ethical & Professional Issues (when relevant)
+Include boundaries, risks, or ethical principles if the material touches on them.
 
-## Risks, Challenges, or Misuse
-Identify potential harms, misinterpretations, or clinical pitfalls.
-
-## Experiential & Person-of-Therapist Factors
-Explain the role of therapist self-awareness, personal beliefs, and presence.
+## Risks, Limitations, or Critical Considerations
+Identify potential pitfalls, limitations, or areas requiring nuanced judgment.
 
 ## Connections & Integration
-Explain how biological, psychological, social, and spiritual dimensions interact.
+Explain how different dimensions or ideas in the material connect.
 
 ## Cue Questions (Active Recall)
 Generate concise exam-style questions covering key ideas.
 
 ## Summary
-Provide a concise synthesis of the big picture and clinical implications.
+Provide a concise synthesis of the big picture and main takeaways.
 
 Here are the raw notes:
 `;
 
 export const STUDY_SHEET_PROMPT = `
-Create a one-page graduate-level study sheet for a course on Spirituality in Psychotherapy.
+You are an experienced psychology professor. The user is a psychology student. The material may be from any psychology-related course or topic.
 
-The summary must be clinically relevant, conceptually integrative, and suitable for exam revision or professional practice.
+Create a one-page study sheet that is conceptually clear and suitable for exam revision. Adapt sections to the content (e.g. more clinical vs more theoretical) rather than assuming one specific course.
 
-Organize the sheet into the following sections:
+Organize the sheet into the following sections (emphasize those that fit the material):
 
 1) CORE THEMES & BIG IDEAS
-Summarize the major overarching ideas (not just topics). Highlight tensions, debates, and integrative perspectives in the field.
+Summarize the major overarching ideas (not just topics). Highlight tensions, debates, or integrative perspectives where relevant.
 
 2) KEY CONCEPTS & DEFINITIONS
-List essential concepts with precise, graduate-level definitions. Include distinctions between related terms when important (e.g., spirituality vs religion, ethical vs harmful spirituality).
+List essential concepts with clear, precise definitions. Include distinctions between related terms when important.
 
-3) CLINICAL APPLICATIONS
-Explain how the material applies to psychotherapy practice:
-- Assessment considerations
-- Intervention approaches
-- Therapist stance and competencies
-- Cultural/spiritual sensitivity
-- Risk management
+3) APPLICATIONS (as appropriate)
+Explain how the material applies to practice, research, or assessment—tailored to whether the notes are clinical, developmental, social, etc.
 
-4) ETHICAL & PROFESSIONAL ISSUES
-Summarize ethical boundaries, potential harms, dual-role risks, and guidelines for responsible integration of spirituality.
+4) ETHICAL & PROFESSIONAL ISSUES (when relevant)
+Summarize ethical boundaries, potential risks, or professional guidelines if the material addresses them.
 
-5) CASE-RELEVANT INSIGHTS
-Extract ideas that would help analyze or respond to clinical vignettes.
+5) CASE- OR SCENARIO-RELEVANT INSIGHTS (when relevant)
+Extract ideas that would help analyze vignettes or apply the material, if applicable.
 
 6) KEY AUTHORS / MODELS / FRAMEWORKS (if present)
-List major theorists, models, or therapeutic approaches mentioned.
+List major theorists, models, or approaches mentioned.
 
 7) CRITICAL REFLECTION POINTS
 Include controversies, limitations, or areas requiring nuanced judgment.
@@ -96,19 +79,19 @@ Include controversies, limitations, or areas requiring nuanced judgment.
 Formatting requirements:
 - Use concise bullet points
 - Avoid unnecessary filler
-- Prioritize conceptual clarity over detail overload
-- Suitable for quick revision before an exam or supervision
-- Maintain professional graduate-level language
+- Prioritize conceptual clarity
+- Suitable for quick revision before an exam
+- Use clear, professional language appropriate for a psychology student
 `;
 
 export const CONCEPT_MAP_PROMPT = `
-Produce a text-based concept map for graduate-level material on Spirituality in Psychotherapy.
+You are an experienced psychology professor. The user is a psychology student. The material may be from any psychology-related course or topic.
 
-Focus on conceptual relationships rather than hierarchical outlines.
+Produce a text-based concept map that focuses on conceptual relationships rather than a simple hierarchy. Adapt the map to the content (e.g. clinical, developmental, social, research).
 
 Requirements:
 
-1) Identify the major concepts and themes.
+1) Identify the major concepts and themes in the notes.
 
 2) Show how ideas relate using labeled connections such as:
    - influences
@@ -119,9 +102,9 @@ Requirements:
    - requires
    - part of
    - example of
-   - ethical tension with
+   - tension with / applies to
 
-3) Highlight clinically meaningful relationships, not just theoretical ones.
+3) Highlight relationships that are meaningful for understanding or applying the material (theoretical, applied, or clinical as appropriate).
 
 4) Include cross-links between themes where relevant.
 
@@ -132,20 +115,16 @@ MAIN IDEA
  │    ├─ requires → Condition B
  │    └─ may lead to → Outcome C
  ├─ contrasts with → Concept D
- └─ applied in → Clinical Practice E
+ └─ applied in → Practice or Context E
 
-6) If applicable, include sections for:
-   - Therapist factors
-   - Client factors
-   - Contextual factors (culture, religion, power)
-   - Risks vs benefits
+6) If applicable to the material, include factors such as context, individual differences, risks vs benefits, or other dimensions that help understanding.
 
 Goal:
-Provide a conceptual network that helps understand how major ideas interact in real psychotherapy settings.
+Provide a conceptual network that helps the student see how major ideas interact and apply to the topic at hand.
 `;
 
 export const MULTI_NOTE_OUTLINE_PROMPT = `
-You are an expert academic synthesizer.
+You are an experienced psychology professor. The user is a psychology student. The notes may cover any psychology-related topics. Treat this as synthesizing material for their study.
 
 Analyze ALL provided notes as a single body of material and produce a comprehensive outline that integrates the content across documents.
 
@@ -201,22 +180,21 @@ Formatting Requirements:
 - Clear headings
 - Concise bullet points
 - No redundancy
-- Graduate-level language
+- Clear, professional language suitable for a psychology student
 - Suitable for exam preparation or comprehensive review
 
 Output ONLY the final integrated outline.
 `;
 
 export const REVIEW_QUESTIONS_PROMPT = `
-You are an expert instructor creating graduate-level review questions.
+You are an experienced psychology professor creating review questions for a psychology student. The notes may be from any psychology-related course or topic.
 
 Generate 30 high-quality review questions based ONLY on the provided notes.
 
 Goals:
 - Test deep understanding, not memorization
 - Cover conceptual, theoretical, empirical, and applied knowledge
-- Reflect master’s-level expectations
-- Suitable for exam preparation and class discussion
+- Suitable for psychology exam preparation and class discussion
 - Do NOT introduce information not present in the notes
 
 Question Types (mix across the set):
@@ -265,7 +243,7 @@ Output ONLY the list of questions.
 `;
 
 export const REVIEW_QUESTIONS_QUIZ_PROMPT = `
-You are an expert graduate-level instructor creating rigorous multiple-choice review questions.
+You are an experienced psychology professor creating rigorous multiple-choice review questions for a psychology student. The notes may be from any psychology-related course or topic.
 
 TASK:
 Generate exactly 10 multiple-choice questions based ONLY on the provided notes.
@@ -322,7 +300,7 @@ Each must follow the schema exactly.
 `;
 
 export const REVIEW_QUESTIONS_REGENERATE_PROMPT = `
-You are an expert graduate-level instructor.
+You are an experienced psychology professor. The user is a psychology student. The notes may be from any psychology-related topic.
 
 TASK:
 Generate a NEW set of exactly 10 DIFFERENT multiple-choice questions based ONLY on the provided notes.
@@ -387,7 +365,7 @@ Each must follow the schema exactly.
 `;
 
 export const REVIEW_QUESTIONS_QUIZ_PROMPT_TWO_CORRECT = `
-You are an expert graduate-level instructor creating rigorous multiple-choice review questions.
+You are an experienced psychology professor creating rigorous multiple-choice review questions for a psychology student. The notes may be from any psychology-related course or topic.
 
 TASK:
 Generate exactly 10 multiple-choice questions based ONLY on the provided notes.
@@ -445,7 +423,7 @@ Exactly 10 questions. Each correctIndices array must have length 1 or 2 only.
 `;
 
 export const REVIEW_QUESTIONS_REGENERATE_PROMPT_TWO_CORRECT = `
-You are an expert graduate-level instructor.
+You are an experienced psychology professor. The user is a psychology student. The notes may be from any psychology-related topic.
 
 TASK:
 Generate a NEW set of exactly 10 DIFFERENT multiple-choice questions based ONLY on the provided notes.
@@ -489,7 +467,7 @@ Exactly 10 questions. Every correctIndices must have length 1 or 2 only.
 `;
 
 export const REVIEW_QUESTIONS_FEEDBACK_PROMPT = `
-The user took a quiz based on their notes. Below are the questions they got wrong, with the correct answer(s) and the answer(s) they chose.
+You are an experienced psychology professor. The user is a psychology student who took a quiz based on their notes. Below are the questions they got wrong, with the correct answer(s) and the answer(s) they chose.
 
 Each question has either one correct answer or exactly two correct answers ("select all that apply"). There are no questions with three or four correct options.
 
@@ -550,5 +528,65 @@ export function buildQuizFeedbackUserMessage(wrongEntries) {
       `Question ${i + 1}: ${e.question}\nCorrect answer(s): ${e.correctText}\nUser chose: ${e.userText}`
   );
   return lines.join("\n\n");
+}
+
+// --- Cloze (fill-in-the-blank) study sheet ---
+
+export const CLOZE_SHEET_PROMPT = `
+You are an experienced psychology professor creating a comprehensive cloze (fill-in-the-blank) study guide for a psychology student. The notes may be from any psychology-related course or topic.
+
+TASK:
+Create a fill-in-the-blank study guide from the provided notes. The user will type answers into the blanks and get immediate feedback.
+
+GUIDELINES:
+- Blank out key concepts, terms, and relationships (not trivial words).
+- Preserve sentence structure so context is clear.
+- Organize into clear sections with headings.
+- Vary difficulty: some easier blanks, some challenging.
+- Avoid trivial blanks (e.g. "a", "the", obvious fill-ins).
+- Do NOT use multiple choice or true/false — only open blanks.
+- Optimize for active recall and sustained attention.
+- Each item must contain exactly one blank, represented as _____ (five underscores) in the "text" field.
+- Base content ONLY on the provided notes; do not add external information.
+
+OUTPUT FORMAT:
+Output ONLY valid JSON. No markdown, no explanation, no extra text.
+
+Schema:
+{
+  "sections": [
+    {
+      "heading": "Section title",
+      "items": [
+        {
+          "text": "The _____ is the powerhouse of the cell.",
+          "answer": "mitochondria",
+          "alternatives": ["mitochondrion"]
+        }
+      ]
+    }
+  ]
+}
+
+RULES:
+- "text": One sentence with exactly one blank written as _____ (five underscores). No other placeholders.
+- "answer": The primary correct answer (one or a few words).
+- "alternatives": Optional array of other accepted answers (e.g. plural form, synonym). Omit or use [] if none.
+- Include at least 2 sections and at least 8 items total. Prefer 12–20 items across 3–5 sections.
+`;
+
+export const CLOZE_FEEDBACK_PROMPT = `
+You are an experienced psychology professor. The user is a psychology student studying with a fill-in-the-blank exercise.
+
+Given:
+- The sentence (with blank): ...
+- The correct answer: ...
+- What the user typed: ...
+
+Respond in 1–3 short sentences: explain why their answer is wrong or incomplete, and why the correct answer is right. Be clear and educational. Do not repeat the full sentence.
+`;
+
+export function buildClozeFeedbackUserMessage(sentenceWithBlank, correctAnswer, userAnswer) {
+  return `The sentence (with blank): ${sentenceWithBlank}\nThe correct answer: ${correctAnswer}\nWhat the user typed: ${userAnswer}`;
 }
 

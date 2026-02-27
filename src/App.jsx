@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { generateWithDeepSeek } from "./deepseekClient.js";
 import {
@@ -10,9 +10,12 @@ import {
   REVIEW_QUESTIONS_REGENERATE_PROMPT,
   REVIEW_QUESTIONS_REGENERATE_PROMPT_TWO_CORRECT,
   REVIEW_QUESTIONS_FEEDBACK_PROMPT,
+  CLOZE_SHEET_PROMPT,
+  CLOZE_FEEDBACK_PROMPT,
   buildUserMessageWithNotes,
   buildUserMessageWithMultipleNotes,
   buildQuizFeedbackUserMessage,
+  buildClozeFeedbackUserMessage,
   buildRegenerateContextMessage
 } from "./prompts.js";
 
@@ -44,6 +47,37 @@ function parseQuizJson(raw) {
   return questions.length >= 1 ? questions : null;
 }
 
+const CLOZE_BLANK = "_____";
+
+function parseClozeJson(raw) {
+  let str = String(raw).trim();
+  const codeBlock = str.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (codeBlock) str = codeBlock[1].trim();
+  const data = JSON.parse(str);
+  const sections = Array.isArray(data?.sections) ? data.sections : [];
+  const normalized = [];
+  for (let s = 0; s < sections.length; s++) {
+    const sec = sections[s];
+    const heading = typeof sec.heading === "string" ? sec.heading : `Section ${s + 1}`;
+    const items = Array.isArray(sec.items) ? sec.items : [];
+    const sectionItems = [];
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      const text = typeof it.text === "string" ? it.text : "";
+      const answer = typeof it.answer === "string" ? it.answer.trim() : "";
+      if (!text.includes(CLOZE_BLANK) || !answer) continue;
+      const alternatives = Array.isArray(it.alternatives)
+        ? it.alternatives.map((a) => String(a).trim()).filter(Boolean)
+        : [];
+      sectionItems.push({ text, answer, alternatives });
+    }
+    if (sectionItems.length > 0) {
+      normalized.push({ heading, items: sectionItems });
+    }
+  }
+  return normalized.length >= 1 ? normalized : null;
+}
+
 const SUPPORT_EXTENSIONS = [".txt", ".md"];
 
 function isSupportedFile(name) {
@@ -66,29 +100,85 @@ function getApiStatus(apiError, isOnline) {
   return "ready";
 }
 
+function getDisplayNamesForFiles(fileList) {
+  const byName = {};
+  fileList.forEach((f) => {
+    if (!byName[f.name]) byName[f.name] = [];
+    byName[f.name].push(f.id);
+  });
+  const displayNames = {};
+  fileList.forEach((f) => {
+    const ids = byName[f.name];
+    const idx = ids.indexOf(f.id);
+    if (idx === 0) {
+      displayNames[f.id] = f.name;
+    } else {
+      const lastDot = f.name.lastIndexOf(".");
+      const base = lastDot > 0 ? f.name.slice(0, lastDot) : f.name;
+      const ext = lastDot > 0 ? f.name.slice(lastDot) : "";
+      displayNames[f.id] = `${base} (${idx})${ext}`;
+    }
+  });
+  return displayNames;
+}
+
 const initialOutputs = {
   reviewSheet: "",
   conceptMap: "",
-  reviewQuestionsQuiz: null
+  reviewQuestionsQuiz: null,
+  clozeSheet: null
 };
 
+const SESSION_STORAGE_KEY = "cursor-notes-state";
+
+let initialSessionCache = null;
+function getInitialSessionState() {
+  if (initialSessionCache !== null) return initialSessionCache;
+  try {
+    const raw = sessionStorage.getItem(SESSION_STORAGE_KEY);
+    initialSessionCache = raw ? JSON.parse(raw) : null;
+  } catch {
+    initialSessionCache = null;
+  }
+  return initialSessionCache;
+}
+
+function fileToStorable(f) {
+  const { fileObject, handle, ...rest } = f;
+  return rest;
+}
+
 export default function App() {
-  const [files, setFiles] = useState([]);
+  const [files, setFiles] = useState(() => {
+    const s = getInitialSessionState();
+    return s && Array.isArray(s.files) ? s.files : [];
+  });
   const filesRef = useRef(files);
   filesRef.current = files;
-  const [selectedFileId, setSelectedFileId] = useState(null);
-  const [selectedFileIds, setSelectedFileIds] = useState([]);
+  const [selectedFileId, setSelectedFileId] = useState(() => {
+    const s = getInitialSessionState();
+    return s && s.selectedFileId != null ? s.selectedFileId : null;
+  });
+  const [selectedFileIds, setSelectedFileIds] = useState(() => {
+    const s = getInitialSessionState();
+    return s && Array.isArray(s.selectedFileIds) ? s.selectedFileIds : [];
+  });
   const [outputSelection, setOutputSelection] = useState({
     reviewSheet: false,
     conceptMap: false,
     reviewQuestions: false,
     includeTwoCorrectQuestions: false,
+    clozeSheet: false,
     multiNoteOutline: false
   });
-  const [multiNoteOutlineContent, setMultiNoteOutlineContent] = useState("");
+  const [multiNoteOutlineContent, setMultiNoteOutlineContent] = useState(() => {
+    const s = getInitialSessionState();
+    return s && typeof s.multiNoteOutlineContent === "string" ? s.multiNoteOutlineContent : "";
+  });
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSubmittingQuiz, setIsSubmittingQuiz] = useState(false);
   const [isRegeneratingQuiz, setIsRegeneratingQuiz] = useState(false);
+  const [clozeExplainLoading, setClozeExplainLoading] = useState(null);
   const [globalError, setGlobalError] = useState("");
   const [apiError, setApiError] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -97,6 +187,30 @@ export default function App() {
     () => getApiStatus(apiError, true),
     [apiError]
   );
+
+  const sortedFiles = useMemo(
+    () => [...files].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })),
+    [files]
+  );
+
+  const fileDisplayNames = useMemo(
+    () => getDisplayNamesForFiles(sortedFiles),
+    [sortedFiles]
+  );
+
+  useEffect(() => {
+    try {
+      const state = {
+        files: files.map(fileToStorable),
+        multiNoteOutlineContent,
+        selectedFileId,
+        selectedFileIds
+      };
+      sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(state));
+    } catch (e) {
+      // sessionStorage full or unavailable; ignore
+    }
+  }, [files, multiNoteOutlineContent, selectedFileId, selectedFileIds]);
 
   const handleFolderSelect = useCallback(async () => {
     setGlobalError("");
@@ -191,7 +305,8 @@ export default function App() {
       const selectedAny =
         selection.reviewSheet ||
         selection.conceptMap ||
-        selection.reviewQuestions;
+        selection.reviewQuestions ||
+        selection.clozeSheet;
       if (!selectedAny) {
         throw new Error("Please select at least one output type.");
       }
@@ -247,6 +362,12 @@ export default function App() {
         newOutputs.reviewQuestionsQuiz = questions ? { questions } : { raw: content };
       }
 
+      if (selection.clozeSheet) {
+        const content = await generateWithDeepSeek(CLOZE_SHEET_PROMPT, userMessage);
+        const sections = parseClozeJson(content);
+        newOutputs.clozeSheet = sections ? { sections } : { raw: content };
+      }
+
       updateFileStatus(fileId, {
         outputs: newOutputs
       });
@@ -273,6 +394,22 @@ export default function App() {
     []
   );
 
+  const handleDeleteSelected = useCallback(() => {
+    const toRemove = new Set(
+      selectedFileIds.length > 0 ? selectedFileIds : selectedFileId ? [selectedFileId] : []
+    );
+    if (toRemove.size === 0) return;
+    const nextFiles = files.filter((f) => !toRemove.has(f.id));
+    const newSelectedId =
+      selectedFileId && nextFiles.some((f) => f.id === selectedFileId)
+        ? selectedFileId
+        : nextFiles[0]?.id ?? null;
+    setFiles(nextFiles);
+    setSelectedFileId(newSelectedId);
+    setSelectedFileIds(newSelectedId ? [newSelectedId] : []);
+    setGlobalError("");
+  }, [files, selectedFileId, selectedFileIds]);
+
   const handleRefresh = useCallback(() => {
     setFiles((prev) =>
       prev.map((f) => ({
@@ -280,6 +417,9 @@ export default function App() {
         outputs: { ...initialOutputs },
         quizUserAnswers: undefined,
         quizFeedback: undefined,
+        clozeUserInputs: undefined,
+        clozeExplanations: undefined,
+        clozeSubmittedBlanks: undefined,
         status: "idle",
         error: ""
       }))
@@ -307,6 +447,7 @@ export default function App() {
       outputSelection.reviewSheet ||
       outputSelection.conceptMap ||
       outputSelection.reviewQuestions ||
+      outputSelection.clozeSheet ||
       outputSelection.multiNoteOutline;
     if (!selectedAny) {
       setGlobalError("Please select at least one output type.");
@@ -330,7 +471,8 @@ export default function App() {
       if (
         outputSelection.reviewSheet ||
         outputSelection.conceptMap ||
-        outputSelection.reviewQuestions
+        outputSelection.reviewQuestions ||
+        outputSelection.clozeSheet
       ) {
         for (const id of targetIds) {
           const file = filesRef.current.find((f) => f.id === id);
@@ -538,6 +680,82 @@ export default function App() {
     [outputSelection.includeTwoCorrectQuestions, updateFileStatus]
   );
 
+  const getClozeFlatItems = useCallback((sections) => {
+    if (!Array.isArray(sections)) return [];
+    const flat = [];
+    sections.forEach((sec) => {
+      (sec.items || []).forEach((it) => flat.push(it));
+    });
+    return flat;
+  }, []);
+
+  const handleClozeInput = useCallback((fileId, blankIndex, value) => {
+    setFiles((prev) =>
+      prev.map((f) => {
+        if (f.id !== fileId) return f;
+        const sections = f.outputs?.clozeSheet?.sections;
+        const flat = getClozeFlatItems(sections);
+        const len = flat.length;
+        if (blankIndex < 0 || blankIndex >= len) return f;
+        const current = Array.isArray(f.clozeUserInputs) ? f.clozeUserInputs : [];
+        const arr = current.length >= len ? [...current] : [...current, ...Array(len - current.length).fill(null)];
+        const next = [...arr];
+        next[blankIndex] = value;
+        return { ...f, clozeUserInputs: next };
+      })
+    );
+  }, [getClozeFlatItems]);
+
+  const handleClozeSubmitBlank = useCallback((fileId, blankIndex) => {
+    setFiles((prev) =>
+      prev.map((f) => {
+        if (f.id !== fileId) return f;
+        const current = Array.isArray(f.clozeSubmittedBlanks) ? f.clozeSubmittedBlanks : [];
+        if (current.includes(blankIndex)) return f;
+        return { ...f, clozeSubmittedBlanks: [...current, blankIndex] };
+      })
+    );
+  }, []);
+
+  const handleClozeExplain = useCallback(
+    async (fileId, blankIndex) => {
+      const file = filesRef.current.find((f) => f.id === fileId);
+      const sections = file?.outputs?.clozeSheet?.sections;
+      const flat = getClozeFlatItems(sections);
+      const item = flat[blankIndex];
+      const userInput = (file?.clozeUserInputs || [])[blankIndex];
+      if (!item || userInput == null || String(userInput).trim() === "") return;
+      const key = `${fileId}-${blankIndex}`;
+      setClozeExplainLoading(key);
+      try {
+        const userMessage = buildClozeFeedbackUserMessage(
+          item.text,
+          item.answer,
+          String(userInput).trim()
+        );
+        const explanation = await generateWithDeepSeek(CLOZE_FEEDBACK_PROMPT, userMessage);
+        updateFileStatus(fileId, {
+          clozeExplanations: {
+            ...(file?.clozeExplanations || {}),
+            [blankIndex]: explanation.trim()
+          }
+        });
+      } catch (err) {
+        const message = err?.message || "Failed to get explanation.";
+        updateFileStatus(fileId, {
+          clozeExplanations: {
+            ...(file?.clozeExplanations || {}),
+            [blankIndex]: `Error: ${message}`
+          }
+        });
+        if (message.toLowerCase().includes("deepseek")) setApiError(message);
+      } finally {
+        setClozeExplainLoading(null);
+      }
+    },
+    [getClozeFlatItems, updateFileStatus]
+  );
+
   const handleDownloadHtml = useCallback(
     (typeKey) => {
       let content;
@@ -564,9 +782,66 @@ export default function App() {
         suffix =
           typeKey === "reviewSheet"
             ? "review"
+            : typeKey === "clozeSheet"
+            ? "fill-in-the-blank"
             : "concept-map";
         baseName = selectedFile.name.replace(/\.[^.]+$/, "");
-        title = `${baseName} – ${suffix.replace("-", " ")}`;
+        title = `${baseName} – ${suffix.replace(/-/g, " ")}`;
+      }
+
+      const escapeHtml = (str) =>
+        String(str)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+
+      if (typeKey === "clozeSheet") {
+        if (!content?.sections) {
+          setGlobalError("No fill-in-the-blank sheet to download (generate one first).");
+          return;
+        }
+        const clozeParts = [];
+        content.sections.forEach((sec) => {
+          clozeParts.push(`<h3 class="cloze-heading">${escapeHtml(sec.heading)}</h3><ul class="cloze-list">`);
+          (sec.items || []).forEach((it) => {
+            const safe = escapeHtml(it.text);
+            clozeParts.push(`<li class="cloze-item">${safe}</li>`);
+          });
+          clozeParts.push("</ul>");
+        });
+        const clozeBody = clozeParts.join("");
+        const clozeHtml = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>${escapeHtml(title)}</title>
+    <meta name="viewport" content="width:device-width, initial-scale=1" />
+    <style>
+      body { font-family: system-ui,sans-serif; max-width: 900px; margin: 2rem auto; padding: 1rem; }
+      .cloze-heading { font-size: 1.1rem; margin: 1rem 0 0.5rem; }
+      .cloze-list { list-style: none; padding: 0; }
+      .cloze-item { margin-bottom: 0.75rem; line-height: 1.6; }
+    </style>
+  </head>
+  <body>
+    <h1>${escapeHtml(title)}</h1>
+    <div class="cloze-root">${clozeBody}</div>
+  </body>
+</html>`;
+        const blob = new Blob([clozeHtml], { type: "text/html;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${baseName}-${suffix}.html`;
+        a.click();
+        URL.revokeObjectURL(url);
+        return;
+      }
+
+      if (typeof content !== "string") {
+        setGlobalError("Nothing to download for this output type yet.");
+        return;
       }
 
       const html = `<!doctype html>
@@ -1078,6 +1353,19 @@ export default function App() {
               <label className="checkbox-label">
                 <input
                   type="checkbox"
+                  checked={outputSelection.clozeSheet}
+                  onChange={(e) =>
+                    setOutputSelection((prev) => ({
+                      ...prev,
+                      clozeSheet: e.target.checked
+                    }))
+                  }
+                />
+                Fill-in-the-blank
+              </label>
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
                   checked={outputSelection.multiNoteOutline}
                   onChange={(e) =>
                     setOutputSelection((prev) => ({
@@ -1100,11 +1388,25 @@ export default function App() {
 
         <section className="content-layout">
           <aside className="file-list-panel">
-            <div className="panel-header">
-              <h2>Files</h2>
-              <span className="panel-meta">
-                {files.length} {files.length === 1 ? "file" : "files"}
-              </span>
+            <div className="panel-header panel-header-with-actions">
+              <div className="panel-title-row">
+                <h2>Files</h2>
+                <span className="panel-meta">
+                  {files.length} {files.length === 1 ? "file" : "files"}
+                </span>
+              </div>
+              <button
+                type="button"
+                className="btn tiny btn-remove"
+                onClick={handleDeleteSelected}
+                disabled={
+                  !files.length ||
+                  (selectedFileIds.length === 0 && !selectedFileId)
+                }
+                title="Remove selected file(s) from the list"
+              >
+                Delete selected
+              </button>
             </div>
             <div className="file-list">
               {!files.length && (
@@ -1112,7 +1414,7 @@ export default function App() {
                   Load a folder or upload notes to begin.
                 </div>
               )}
-              {files.map((file) => (
+              {sortedFiles.map((file) => (
                 <button
                   key={file.id}
                   type="button"
@@ -1136,7 +1438,9 @@ export default function App() {
                           handleToggleFileCheckbox(file.id);
                         }}
                       />
-                      <span className="file-name">{file.name}</span>
+                      <span className="file-name">
+                        {fileDisplayNames[file.id] ?? file.name}
+                      </span>
                     </div>
                     {renderStatusBadge(file)}
                   </div>
@@ -1171,6 +1475,14 @@ export default function App() {
                 <button
                   type="button"
                   className="btn tiny"
+                  onClick={() => handleDownloadHtml("clozeSheet")}
+                  disabled={!selectedFile || !selectedFile.outputs.clozeSheet?.sections}
+                >
+                  Fill-in-the-blank (web page)
+                </button>
+                <button
+                  type="button"
+                  className="btn tiny"
                   onClick={() => handleDownloadHtml("multiNoteOutline")}
                   disabled={!multiNoteOutlineContent}
                 >
@@ -1193,6 +1505,10 @@ export default function App() {
                 onRegenerateQuiz={handleRegenerateQuiz}
                 isSubmittingQuiz={isSubmittingQuiz}
                 isRegeneratingQuiz={isRegeneratingQuiz}
+                onClozeInput={handleClozeInput}
+                onClozeSubmitBlank={handleClozeSubmitBlank}
+                onClozeExplain={handleClozeExplain}
+                clozeExplainLoading={clozeExplainLoading}
               />
             )}
           </section>
@@ -1213,7 +1529,11 @@ function PreviewTabs({
   onSubmitQuiz,
   onRegenerateQuiz,
   isSubmittingQuiz,
-  isRegeneratingQuiz
+  isRegeneratingQuiz,
+  onClozeInput,
+  onClozeSubmitBlank,
+  onClozeExplain,
+  clozeExplainLoading
 }) {
   const hasMultiNote = Boolean(multiNoteOutlineContent);
   const [activeTab, setActiveTab] = useState(hasMultiNote ? "multiNote" : "review");
@@ -1221,6 +1541,11 @@ function PreviewTabs({
   const quizData = file?.outputs?.reviewQuestionsQuiz;
   const quizQuestions = quizData?.questions;
   const quizParseFailed = quizData?.raw != null && !quizQuestions;
+
+  const clozeData = file?.outputs?.clozeSheet;
+  const clozeSections = clozeData?.sections;
+  const clozeParseFailed = clozeData?.raw != null && !clozeSections;
+  const showCloze = activeTab === "cloze" && Array.isArray(clozeSections) && clozeSections.length > 0;
 
   const tabContent = useMemo(() => {
     if (activeTab === "multiNote") return multiNoteOutlineContent || "";
@@ -1231,8 +1556,13 @@ function PreviewTabs({
   }, [activeTab, file, multiNoteOutlineContent]);
 
   const isQuizTab = activeTab === "questions";
+  const isClozeTab = activeTab === "cloze";
   const showQuiz = isQuizTab && Array.isArray(quizQuestions) && quizQuestions.length > 0;
-  const tabIsEmpty = isQuizTab ? !showQuiz && !quizParseFailed : !tabContent;
+  const tabIsEmpty = isQuizTab
+    ? !showQuiz && !quizParseFailed
+    : isClozeTab
+    ? !showCloze && !clozeParseFailed
+    : !tabContent;
 
   return (
     <div className="tabs-root">
@@ -1258,6 +1588,13 @@ function PreviewTabs({
         >
           Review Questions
         </button>
+        <button
+          type="button"
+          className={"tab" + (activeTab === "cloze" ? " tab-active" : "")}
+          onClick={() => setActiveTab("cloze")}
+        >
+          Fill-in-the-blank
+        </button>
         {hasMultiNote && (
           <button
             type="button"
@@ -1282,6 +1619,18 @@ function PreviewTabs({
             isSubmitting={isSubmittingQuiz}
             isRegenerating={isRegeneratingQuiz}
           />
+        ) : showCloze ? (
+          <ClozeSheet
+            fileId={file.id}
+            sections={clozeSections}
+            userInputs={file.clozeUserInputs || []}
+            submittedBlanks={file.clozeSubmittedBlanks || []}
+            explanations={file.clozeExplanations || {}}
+            onInput={onClozeInput}
+            onSubmitBlank={onClozeSubmitBlank}
+            onRequestExplain={onClozeExplain}
+            explainLoadingKey={clozeExplainLoading}
+          />
         ) : isQuizTab && quizParseFailed ? (
           <div className="quiz-empty">
             <p className="empty-state">Couldn&apos;t parse 10 questions from the response.</p>
@@ -1294,14 +1643,20 @@ function PreviewTabs({
               {isRegeneratingQuiz ? "Regenerating…" : "Regenerate"}
             </button>
           </div>
+        ) : isClozeTab && clozeParseFailed ? (
+          <div className="quiz-empty">
+            <p className="empty-state">Couldn&apos;t parse the fill-in-the-blank sheet from the response.</p>
+          </div>
         ) : tabIsEmpty ? (
           <div className="empty-state">
             {activeTab === "multiNote"
               ? "Select 2+ files, check Multi-note outline, and click Process."
               : isQuizTab
               ? "Check Review Questions and click Process to generate 10 quiz questions."
+              : isClozeTab
+              ? "Check Fill-in-the-blank and click Process to generate the sheet."
               : "Nothing generated yet for this view. Run "}
-            {!isQuizTab && activeTab !== "multiNote" && (
+            {!isQuizTab && activeTab !== "multiNote" && !isClozeTab && (
               <>
                 <span className="mono">Process</span> with this output type selected.
               </>
@@ -1311,6 +1666,108 @@ function PreviewTabs({
           <ReactMarkdown>{tabContent}</ReactMarkdown>
         )}
       </div>
+    </div>
+  );
+}
+
+function isClozeAnswerCorrect(value, answer, alternatives) {
+  const v = String(value || "").trim().toLowerCase();
+  if (!v) return null;
+  const a = answer.trim().toLowerCase();
+  if (v === a) return true;
+  const alt = (alternatives || []).map((x) => String(x).trim().toLowerCase()).filter(Boolean);
+  if (alt.some((x) => x === v)) return true;
+  return false;
+}
+
+function ClozeSheet({
+  fileId,
+  sections,
+  userInputs,
+  submittedBlanks,
+  explanations,
+  onInput,
+  onSubmitBlank,
+  onRequestExplain,
+  explainLoadingKey
+}) {
+  const flatItems = useMemo(() => {
+    const out = [];
+    (sections || []).forEach((sec) => {
+      (sec.items || []).forEach((it) => out.push({ ...it, sectionHeading: sec.heading }));
+    });
+    return out;
+  }, [sections]);
+
+  const submittedSet = useMemo(
+    () => new Set(Array.isArray(submittedBlanks) ? submittedBlanks : []),
+    [submittedBlanks]
+  );
+
+  let globalIndex = 0;
+  return (
+    <div className="cloze-root">
+      {(sections || []).map((sec, sIdx) => (
+        <section key={sIdx} className="cloze-section">
+          <h3 className="cloze-heading">{sec.heading}</h3>
+          <ul className="cloze-list">
+            {(sec.items || []).map((it, iIdx) => {
+              const blankIndex = globalIndex++;
+              const userVal = userInputs[blankIndex] ?? "";
+              const correct = isClozeAnswerCorrect(userVal, it.answer, it.alternatives);
+              const isSubmitted = submittedSet.has(blankIndex);
+              const hasAttempt = String(userVal).trim() !== "";
+              const isWrong = isSubmitted && hasAttempt && correct === false;
+              const showCorrect = isSubmitted && correct === true;
+              const parts = it.text.split(CLOZE_BLANK);
+              const explainLoading = explainLoadingKey === `${fileId}-${blankIndex}`;
+              const explanation = explanations[blankIndex];
+
+              return (
+                <li key={blankIndex} className="cloze-item">
+                  <span className="cloze-sentence">
+                    {parts[0]}
+                    <input
+                      type="text"
+                      className={
+                        "cloze-input" +
+                        (showCorrect ? " cloze-input-correct" : "") +
+                        (isWrong ? " cloze-input-incorrect" : "")
+                      }
+                      value={userVal}
+                      onChange={(e) => onInput(fileId, blankIndex, e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          onSubmitBlank(fileId, blankIndex);
+                        }
+                      }}
+                      placeholder="_____"
+                      aria-label={`Blank ${blankIndex + 1}`}
+                    />
+                    {parts[1]}
+                  </span>
+                  {isWrong && (
+                    <div className="cloze-feedback">
+                      <span className="cloze-correct-answer">Correct answer: {it.answer}</span>
+                      <button
+                        type="button"
+                        className="btn tiny cloze-explain-btn"
+                        onClick={() => onRequestExplain(fileId, blankIndex)}
+                        disabled={explainLoading}
+                      >
+                        {explainLoading ? "…" : "Explain"}
+                      </button>
+                      {explanation && (
+                        <p className="cloze-explanation">{explanation}</p>
+                      )}
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      ))}
     </div>
   );
 }
