@@ -574,6 +574,10 @@ export default function App() {
         (Array.isArray(indices) ? indices : [indices])
           .map((idx) => `${labels[idx]}) ${(opts[idx] || "").trim()}`)
           .join("; ");
+      const formatLetters = (indices) =>
+        (Array.isArray(indices) ? indices : [indices])
+          .map((idx) => labels[idx])
+          .join(" and ");
       for (let i = 0; i < questions.length; i++) {
         const q = questions[i];
         const chosen = userAnswers[i];
@@ -584,10 +588,18 @@ export default function App() {
           userIndices.length === correctIndices.length &&
           userIndices.every((idx) => correctIndices.includes(idx));
         if (!match) {
+          const optionTexts = (q.options || [])
+            .map((opt, idx) => `${labels[idx]}) ${(opt || "").trim()}`)
+            .filter((line) => line.length > 2)
+            .join("\n");
           wrongEntries.push({
+            questionNumber: i + 1,
             question: q.question,
+            correctLetters: formatLetters(correctIndices),
+            userLetters: formatLetters(userIndices),
             correctText: formatOptions(q.options, correctIndices),
-            userText: formatOptions(q.options, userIndices)
+            userText: formatOptions(q.options, userIndices),
+            optionTexts
           });
         }
       }
@@ -648,6 +660,8 @@ export default function App() {
       setApiError("");
       const currentFile = filesRef.current.find((f) => f.id === fileId);
       updateFileStatus(fileId, {
+        status: "processing",
+        error: "",
         outputs: { ...(currentFile || file).outputs, reviewQuestionsQuiz: null },
         quizUserAnswers: undefined,
         quizFeedback: undefined
@@ -664,15 +678,18 @@ export default function App() {
         if (questions) {
           const latest = filesRef.current.find((f) => f.id === fileId);
           updateFileStatus(fileId, {
+            status: "done",
             outputs: { ...(latest || file).outputs, reviewQuestionsQuiz: { questions } }
           });
         } else {
           setGlobalError("Could not parse new questions. Try again.");
+          updateFileStatus(fileId, { status: "done" });
         }
       } catch (err) {
         const message = err?.message || "Failed to regenerate quiz.";
         setGlobalError(message);
         if (message.toLowerCase().includes("deepseek")) setApiError(message);
+        updateFileStatus(fileId, { status: "error", error: message });
       } finally {
         setIsRegeneratingQuiz(false);
       }
@@ -1607,7 +1624,11 @@ function PreviewTabs({
       </div>
 
       <div className="tabs-body markdown-body">
-        {showQuiz ? (
+        {isQuizTab && isRegeneratingQuiz && !showQuiz ? (
+          <div className="quiz-empty">
+            <p className="empty-state">Regenerating review questions…</p>
+          </div>
+        ) : showQuiz ? (
           <Quiz
             fileId={file.id}
             questions={quizQuestions}

@@ -467,18 +467,22 @@ Exactly 10 questions. Every correctIndices must have length 1 or 2 only.
 `;
 
 export const REVIEW_QUESTIONS_FEEDBACK_PROMPT = `
-You are an experienced psychology professor. The user is a psychology student who took a quiz based on their notes. Below are the questions they got wrong, with the correct answer(s) and the answer(s) they chose.
+You are an experienced psychology professor. The user is a psychology student who took a quiz based on their notes. Below are the questions they got wrong. Each entry includes the question number, the exact wording of every option (A, B, C, D), the correct answer letter(s), and the wrong answer letter(s) they chose.
 
-Each question has either one correct answer or exactly two correct answers ("select all that apply"). There are no questions with three or four correct options.
+CRITICAL — Base explanations only on the actual option text:
+- The input includes the exact wording of each option. When you explain why a chosen option is wrong, refer ONLY to what that option actually says in the input.
+- Do NOT invent, assume, or substitute different content for an option. For example, if Option B in the input says "the age of living members is written inside the shape," your explanation must be about that claim — do not describe Option B as if it were about something else (e.g. behavioral frequency, tantrums, or any content not in the option text).
+- Your explanation for why an option is wrong must match the actual option wording provided. Re-read the option text from the input before writing each explanation.
 
-For each wrong question:
-- Explain briefly why the correct answer(s) (one or two) are right.
-- Explain briefly why the chosen answer(s) are wrong or incomplete.
-- Keep explanations concise, clear, and educational.
+Use the exact question numbers provided so they match the original review sheet.
 
-Format output with clear separation:
-**Question 1:** ...
-**Question 2:** ...
+For each wrong question, use this structure:
+
+**Question [N]:** (use the number from the input)
+- First: State "Correct answer: [letter]" or "Correct answers: [letters]." Then briefly explain why that answer/those answers are right, using the actual option text.
+- Next: State "The wrong answer you chose is [letter]." or "The wrong answers you chose are [letters]." Then explain why that choice is wrong or incomplete, referring only to what that option actually says in the input.
+
+Keep explanations concise, clear, and educational.
 `;
 
 export function buildUserMessageWithNotes(notesText) {
@@ -523,10 +527,17 @@ export function buildUserMessageWithMultipleNotes(entries) {
 }
 
 export function buildQuizFeedbackUserMessage(wrongEntries) {
-  const lines = wrongEntries.map(
-    (e, i) =>
-      `Question ${i + 1}: ${e.question}\nCorrect answer(s): ${e.correctText}\nUser chose: ${e.userText}`
-  );
+  const lines = wrongEntries.map((e) => {
+    const parts = [
+      `Question ${e.questionNumber} (original quiz number):`,
+      e.question,
+      "Options (exact wording):",
+      e.optionTexts || "",
+      `Correct answer(s): ${e.correctLetters}`,
+      `Wrong answer(s) user chose: ${e.userLetters}`
+    ];
+    return parts.join("\n");
+  });
   return lines.join("\n\n");
 }
 
