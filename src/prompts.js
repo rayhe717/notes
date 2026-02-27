@@ -485,8 +485,10 @@ For each wrong question, use this structure:
 Keep explanations concise, clear, and educational.
 `;
 
+const MARKDOWN_STRUCTURE_NOTE = `The notes may be in Markdown. Heading levels (e.g. ##, ###) and **bold** text and *italics* text and ***bold and italics*** text indicate structure and relative importance; treat them as such when selecting and organizing content.`;
+
 export function buildUserMessageWithNotes(notesText) {
-  return `Here are the raw notes:\n\n${notesText}`;
+  return `${MARKDOWN_STRUCTURE_NOTE}\n\nHere are the raw notes:\n\n${notesText}`;
 }
 
 export function buildRegenerateContextMessage(questions, userAnswers) {
@@ -523,7 +525,7 @@ export function buildUserMessageWithMultipleNotes(entries) {
   const parts = entries.map(
     (e) => `--- Note: ${e.name} ---\n\n${e.text}`
   );
-  return `The following are ${entries.length} separate notes. Please create one unified multi-note outline from them.\n\n${parts.join("\n\n")}`;
+  return `${MARKDOWN_STRUCTURE_NOTE}\n\nThe following are ${entries.length} separate notes. Please create one unified multi-note outline from them.\n\n${parts.join("\n\n")}`;
 }
 
 export function buildQuizFeedbackUserMessage(wrongEntries) {
